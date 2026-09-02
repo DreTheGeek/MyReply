@@ -11,8 +11,13 @@ function createPrismaClient() {
     throw new Error("DATABASE_URL environment variable is required");
   }
 
+  // Postgres schema these tables live in. Unset means the Postgres default of
+  // public, which is the upstream behavior. Set it when the database is shared
+  // with other applications, so OpenReply stays in its own schema.
+  const schema = process.env.DATABASE_SCHEMA;
+
   return new PrismaClient({
-    adapter: new PrismaPg(databaseUrl),
+    adapter: new PrismaPg(databaseUrl, schema ? { schema } : undefined),
   });
 }
 
