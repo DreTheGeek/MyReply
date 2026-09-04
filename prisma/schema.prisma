@@ -284,7 +284,7 @@ model Automation {
   keywords             String[]
   matchAnyWord         Boolean  @default(false)
   // Also fire this campaign when someone sends a DM whose text matches the
-  // keywords above. Independent of the post trigger — a DM has no media, so
+  // keywords above. Independent of the post trigger, a DM has no media, so
   // postId / matchAnyPost do not apply to it.
   dmTriggerEnabled     Boolean  @default(false)
   // Fire when someone replies to one of your stories with matching text.
