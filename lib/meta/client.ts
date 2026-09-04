@@ -924,7 +924,24 @@ export async function subscribeInstagramAccountToWebhooks(
     }
   );
 
-  return handleResponse(response);
+  const result = await handleResponse<{ success?: boolean }>(response);
+
+  // Meta answers a refused subscription with HTTP 200 and {"success": false},
+  // so the status code alone reports a silent no-op as a success. That is how
+  // this account ran for weeks subscribed to two fields while the code believed
+  // it had asked for nine. A field the app is not approved for (follow and
+  // share_to_story are both valid names but gated) fails the whole call, so
+  // this has to be loud.
+  if (result?.success === false) {
+    throw new MetaApiError(
+      0,
+      undefined,
+      undefined,
+      "Instagram refused the webhook subscription. One of the requested fields is not available to this app."
+    );
+  }
+
+  return { success: true };
 }
 
 export interface ConversationStarter {

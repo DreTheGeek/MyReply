@@ -79,8 +79,8 @@ export async function GET(request: NextRequest) {
       // refresh, which is the job that actually keeps the account working.
       try {
         await subscribeInstagramAccountToWebhooks(
-          newToken,
-          account.instagramId
+          account.instagramId,
+          newToken
         );
       } catch (subscribeError) {
         console.warn(

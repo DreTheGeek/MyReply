@@ -105,6 +105,10 @@ model Workspace {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /// FREE gets everything with no marginal cost. PRO adds managed AI and
+  /// advanced flows. BYOK AI is free on both: the key is the customer's.
+  plan            WorkspacePlan @default(FREE)
+
   usagePeriodStart  DateTime @default(now())
   dmsSentThisPeriod Int      @default(0)
 
@@ -121,6 +125,8 @@ model Workspace {
   apiKeys           ApiKey[]
   contacts          Contact[]
   tags              Tag[]
+  knowledgeSources  KnowledgeSource[]
+  assistantAnswers  AssistantAnswer[]
   outboundMessages  OutboundMessage[]
   aiCredential      WorkspaceAiCredential?
 
@@ -161,6 +167,7 @@ model Contact {
   instagramAccount InstagramAccount  @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
   tags             ContactTag[]
   dmLogs           DmLog[]
+  assistantAnswers AssistantAnswer[]
   outboundMessages OutboundMessage[]
 
   @@unique([instagramAccountId, externalId])
@@ -619,4 +626,102 @@ enum OperationalEventLevel {
   INFO
   WARNING
   ERROR
+}
+
+/// A source of truth the assistant may answer customers from.
+///
+/// Ingest is the axis the competition is weakest on: ManyChat takes one URL per
+/// entry with no crawl and no PDF, and Chatfuel is a hand-typed form. A source
+/// here can be a crawled site, an uploaded document, or a hand written answer,
+/// and a crawled source can re-sync on a schedule.
+model KnowledgeSource {
+  id          String              @id @default(cuid())
+  workspaceId String
+  kind        KnowledgeSourceKind
+  /// Display name. For a crawl this defaults to the hostname.
+  title       String
+  /// Crawl root for WEBSITE, original filename for DOCUMENT, null for MANUAL.
+  url         String?
+  /// How deep a crawl follows links from the root. Ignored by other kinds.
+  crawlDepth  Int                 @default(1)
+  status      KnowledgeStatus     @default(PENDING)
+  /// Why the last ingest failed, shown to the operator rather than swallowed.
+  errorMessage String?
+  lastSyncedAt DateTime?
+  /// Null means never re-sync. Set for crawls the operator wants kept fresh.
+  syncEveryHours Int?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  workspace Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  chunks    KnowledgeChunk[]
+
+  @@index([workspaceId])
+  @@index([status])
+}
+
+/// One retrievable passage. Chunking happens at ingest so answering never pays
+/// to split a document, and so a citation can point at the exact passage used.
+model KnowledgeChunk {
+  id       String @id @default(cuid())
+  sourceId String
+  /// Position within the source, so neighbouring chunks can be stitched back.
+  ordinal  Int
+  content  String
+  /// Where this passage came from, for the citation shown under an answer.
+  citation String?
+  createdAt DateTime @default(now())
+
+  source KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([sourceId])
+}
+
+/// Every answer the assistant gave a real customer, kept so a human can correct
+/// it. Only Tidio ships a loop like this; ManyChat's feedback goes to ManyChat
+/// rather than into your knowledge base.
+model AssistantAnswer {
+  id                 String   @id @default(cuid())
+  workspaceId        String
+  instagramAccountId String?
+  contactId          String?
+  question           String
+  answer             String
+  /// 0 to 1. Below the workspace threshold the answer is not sent.
+  confidence         Float
+  /// True when the assistant declined and the conversation went to a human.
+  handedOff          Boolean  @default(false)
+  /// Set by a human reviewing the answer. Null means unreviewed.
+  verdict            AnswerVerdict?
+  /// The corrected answer a human supplied. Fed back as a MANUAL source.
+  correction         String?
+  createdAt          DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contact   Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, verdict])
+}
+
+enum KnowledgeSourceKind {
+  WEBSITE
+  DOCUMENT
+  MANUAL
+}
+
+enum KnowledgeStatus {
+  PENDING
+  READY
+  FAILED
+}
+
+enum AnswerVerdict {
+  GOOD
+  WRONG
+}
+
+enum WorkspacePlan {
+  FREE
+  PRO
 }
