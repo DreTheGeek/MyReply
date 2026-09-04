@@ -1,7 +1,9 @@
+import type { WorkspaceRole } from "@/app/generated/prisma/client";
 import { prisma } from "@/lib/db/client";
 import { buildTrackedUrl } from "@/lib/tracking/message";
 import { generateTrackedLinkSlug } from "@/lib/tracking/server";
 import { generateReportShareSlug } from "@/lib/reports/share";
+import { canManageWorkspace } from "@/lib/roles";
 
 /**
  * The tools an AI agent can call over MCP.
@@ -158,14 +160,40 @@ export const MCP_TOOLS: McpTool[] = [
 type ToolResult = Record<string, unknown>;
 
 /**
+ * Tools that change something. A key carrying only MEMBER is refused these,
+ * matching what the same role is refused over REST.
+ *
+ * Without this the MCP surface was a way around the REST role gate: a MEMBER
+ * key that could not create a campaign through /api/v1 could create one
+ * through a tool call.
+ */
+const WRITE_TOOLS = new Set(["create_campaign", "update_campaign"]);
+
+/** The tools a role may actually call, so a model is not offered what it cannot use. */
+export function mcpToolsForRole(role: WorkspaceRole): McpTool[] {
+  if (canManageWorkspace(role)) return MCP_TOOLS;
+  return MCP_TOOLS.filter((tool) => !WRITE_TOOLS.has(tool.name));
+}
+
+/**
  * Run a tool for one workspace. Throws on bad input so the caller can turn it
  * into an MCP error; returns plain JSON-serialisable data otherwise.
+ *
+ * The workspace and the role both come from the caller's credential, never
+ * from the model's arguments.
  */
 export async function runMcpTool(
   name: string,
   args: Record<string, unknown>,
-  workspaceId: string
+  workspaceId: string,
+  role: WorkspaceRole
 ): Promise<ToolResult> {
+  if (WRITE_TOOLS.has(name) && !canManageWorkspace(role)) {
+    throw new Error(
+      `This key has ${role} access, which is read only. Creating and changing campaigns needs an admin key.`
+    );
+  }
+
   switch (name) {
     case "list_instagram_accounts": {
       const accounts = await prisma.instagramAccount.findMany({

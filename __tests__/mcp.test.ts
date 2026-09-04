@@ -28,9 +28,11 @@ vi.mock("@/lib/tracking/message", () => ({
   buildTrackedUrl: (s: string) => `https://x/r/${s}`,
 }));
 
-import { MCP_TOOLS, runMcpTool } from "../lib/mcp/tools";
+import { MCP_TOOLS, mcpToolsForRole, runMcpTool } from "../lib/mcp/tools";
 
 const WS = "ws_1";
+const ADMIN = "ADMIN" as const;
+const MEMBER = "MEMBER" as const;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -81,7 +83,8 @@ describe("workspace isolation", () => {
           dmMessage: "hi",
           matchAnyPost: true,
         },
-        WS
+        WS,
+        ADMIN
       )
     ).rejects.toThrow(/Unknown Instagram account/);
     expect(mockPrisma.automation.create).not.toHaveBeenCalled();
@@ -90,17 +93,17 @@ describe("workspace isolation", () => {
   it("update_campaign refuses a campaign from another workspace", async () => {
     mockPrisma.automation.findFirst.mockResolvedValue(null);
     await expect(
-      runMcpTool("update_campaign", { id: "camp_other", isActive: false }, WS)
+      runMcpTool("update_campaign", { id: "camp_other", isActive: false }, WS, ADMIN)
     ).rejects.toThrow(/Unknown campaign/);
     expect(mockPrisma.automation.update).not.toHaveBeenCalled();
   });
 
   it("scopes every list query to the caller's workspace", async () => {
     mockPrisma.automation.findMany.mockResolvedValue([]);
-    await runMcpTool("list_campaigns", {}, WS);
-    expect(mockPrisma.automation.findMany.mock.calls[0][0].where.workspaceId).toBe(
-      WS
-    );
+    await runMcpTool("list_campaigns", {}, WS, ADMIN);
+    expect(
+      mockPrisma.automation.findMany.mock.calls[0][0].where.workspaceId
+    ).toBe(WS);
   });
 });
 
@@ -110,7 +113,8 @@ describe("create_campaign", () => {
       runMcpTool(
         "create_campaign",
         { name: "x", instagramAccountId: "acct_1", keywords: ["a"], dmMessage: "hi" },
-        WS
+        WS,
+        ADMIN
       )
     ).rejects.toThrow(/matchAnyPost/);
   });
@@ -126,7 +130,8 @@ describe("create_campaign", () => {
           dmMessage: "hi",
           matchAnyPost: true,
         },
-        WS
+        WS,
+        ADMIN
       )
     ).rejects.toThrow(/keyword/);
   });
@@ -142,7 +147,8 @@ describe("create_campaign", () => {
           dmMessage: "   ",
           matchAnyPost: true,
         },
-        WS
+        WS,
+        ADMIN
       )
     ).rejects.toThrow(/dmMessage/);
   });
@@ -158,7 +164,8 @@ describe("create_campaign", () => {
         matchAnyPost: true,
         linkUrl: "https://example.com/guide",
       },
-      WS
+      WS,
+      ADMIN
     );
     expect(mockPrisma.trackedLink.create).toHaveBeenCalled();
     expect(out.trackedUrl).toBe("https://x/r/slug123");
@@ -174,7 +181,8 @@ describe("create_campaign", () => {
         dmMessage: "hi",
         matchAnyPost: true,
       },
-      WS
+      WS,
+      ADMIN
     );
     expect(mockPrisma.trackedLink.create).not.toHaveBeenCalled();
     expect(out.trackedUrl).toBeNull();
@@ -185,13 +193,13 @@ describe("update_campaign", () => {
   it("refuses an update that changes nothing", async () => {
     mockPrisma.automation.findFirst.mockResolvedValue({ id: "camp_1" });
     await expect(
-      runMcpTool("update_campaign", { id: "camp_1" }, WS)
+      runMcpTool("update_campaign", { id: "camp_1" }, WS, ADMIN)
     ).rejects.toThrow(/Nothing to update/);
   });
 
   it("can pause a campaign", async () => {
     mockPrisma.automation.findFirst.mockResolvedValue({ id: "camp_1" });
-    await runMcpTool("update_campaign", { id: "camp_1", isActive: false }, WS);
+    await runMcpTool("update_campaign", { id: "camp_1", isActive: false }, WS, ADMIN);
     expect(mockPrisma.automation.update.mock.calls[0][0].data).toEqual({
       isActive: false,
     });
@@ -207,7 +215,7 @@ describe("get_campaign_performance", () => {
     ]);
     mockPrisma.linkClick.count.mockResolvedValue(50);
 
-    const out = await runMcpTool("get_campaign_performance", { id: "c" }, WS);
+    const out = await runMcpTool("get_campaign_performance", { id: "c" }, WS, ADMIN);
     expect(out.sent).toBe(200);
     expect(out.clickRate).toBe(25);
   });
@@ -217,14 +225,56 @@ describe("get_campaign_performance", () => {
     mockPrisma.dmLog.groupBy.mockResolvedValue([]);
     mockPrisma.linkClick.count.mockResolvedValue(0);
 
-    const out = await runMcpTool("get_campaign_performance", { id: "c" }, WS);
+    const out = await runMcpTool("get_campaign_performance", { id: "c" }, WS, ADMIN);
     expect(out.clickRate).toBe(0);
+  });
+});
+
+describe("the key's role", () => {
+  it("refuses a write tool to a read-only key", async () => {
+    await expect(
+      runMcpTool(
+        "create_campaign",
+        {
+          name: "x",
+          instagramAccountId: "acct_1",
+          keywords: ["a"],
+          dmMessage: "hi",
+          matchAnyPost: true,
+        },
+        WS,
+        MEMBER
+      )
+    ).rejects.toThrow(/read only/i);
+    expect(mockPrisma.automation.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses an update to a read-only key", async () => {
+    await expect(
+      runMcpTool("update_campaign", { id: "camp_1", isActive: false }, WS, MEMBER)
+    ).rejects.toThrow(/read only/i);
+    expect(mockPrisma.automation.update).not.toHaveBeenCalled();
+  });
+
+  it("still allows a read-only key to read", async () => {
+    mockPrisma.automation.findMany.mockResolvedValue([]);
+    await expect(
+      runMcpTool("list_campaigns", {}, WS, MEMBER)
+    ).resolves.toBeDefined();
+  });
+
+  it("does not advertise write tools to a read-only key", () => {
+    const names = mcpToolsForRole(MEMBER).map((tool) => tool.name);
+    expect(names).not.toContain("create_campaign");
+    expect(names).not.toContain("update_campaign");
+    expect(names).toContain("list_campaigns");
+    expect(mcpToolsForRole(ADMIN)).toHaveLength(MCP_TOOLS.length);
   });
 });
 
 describe("unknown tools", () => {
   it("throws rather than silently doing nothing", async () => {
-    await expect(runMcpTool("drop_everything", {}, WS)).rejects.toThrow(
+    await expect(runMcpTool("drop_everything", {}, WS, ADMIN)).rejects.toThrow(
       /Unknown tool/
     );
   });

@@ -10,26 +10,14 @@ export type WorkspaceContext = {
   role: WorkspaceRole;
 };
 
-const ROLE_ORDER: Record<WorkspaceRole, number> = {
-  MEMBER: 1,
-  ADMIN: 2,
-  OWNER: 3,
-};
-
-export function hasWorkspaceRole(
-  role: WorkspaceRole,
-  minimumRole: WorkspaceRole
-) {
-  return ROLE_ORDER[role] >= ROLE_ORDER[minimumRole];
-}
-
-export function canManageWorkspace(role: WorkspaceRole) {
-  return hasWorkspaceRole(role, "ADMIN");
-}
-
-export function canManageBilling(role: WorkspaceRole) {
-  return role === "OWNER";
-}
+// Re-exported from the leaf module so every existing import site keeps
+// working, while code that only compares roles can import lib/roles directly
+// without dragging NextAuth and Prisma in behind it.
+export {
+  canManageBilling,
+  canManageWorkspace,
+  hasWorkspaceRole,
+} from "@/lib/roles";
 
 export async function getCurrentWorkspaceContext(): Promise<WorkspaceContext | null> {
   // Machine callers carry their workspace and role on the key itself. There is

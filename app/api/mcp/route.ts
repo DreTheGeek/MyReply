@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRequestApiKeyContext } from "@/lib/auth";
-import { MCP_TOOLS, runMcpTool } from "@/lib/mcp/tools";
+import { MCP_TOOLS, mcpToolsForRole, runMcpTool } from "@/lib/mcp/tools";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,7 +69,9 @@ export async function POST(request: NextRequest) {
       return result(id, {});
 
     case "tools/list":
-      return result(id, { tools: MCP_TOOLS });
+      // Filtered by the key's role, so a read-only key is never offered a
+      // write tool it would only be refused on.
+      return result(id, { tools: mcpToolsForRole(auth.role) });
 
     case "tools/call": {
       const toolName = String(params?.name ?? "");
@@ -80,7 +82,12 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        const output = await runMcpTool(toolName, args, auth.workspaceId);
+        const output = await runMcpTool(
+          toolName,
+          args,
+          auth.workspaceId,
+          auth.role
+        );
         return result(id, {
           content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
         });
