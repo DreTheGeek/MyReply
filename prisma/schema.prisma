@@ -23,13 +23,13 @@ model User {
   // re-checks WorkspaceMember, so a stale or revoked id gives no access.
   activeWorkspaceId String?
 
-  accounts          Account[]
-  sessions          Session[]
-  ownedWorkspaces   Workspace[]       @relation("WorkspaceOwner")
-  workspaceMembers  WorkspaceMember[]
-  sentInvitations   WorkspaceInvitation[] @relation("WorkspaceInvitationsSent")
-  activeWorkspace   Workspace?        @relation("UserActiveWorkspace", fields: [activeWorkspaceId], references: [id], onDelete: SetNull)
-  createdApiKeys    ApiKey[]          @relation("ApiKeyCreatedBy")
+  accounts         Account[]
+  sessions         Session[]
+  ownedWorkspaces  Workspace[]           @relation("WorkspaceOwner")
+  workspaceMembers WorkspaceMember[]
+  sentInvitations  WorkspaceInvitation[] @relation("WorkspaceInvitationsSent")
+  activeWorkspace  Workspace?            @relation("UserActiveWorkspace", fields: [activeWorkspaceId], references: [id], onDelete: SetNull)
+  createdApiKeys   ApiKey[]              @relation("ApiKeyCreatedBy")
 }
 
 /// A machine credential scoped to one workspace, for the public API and for
@@ -119,8 +119,77 @@ model Workspace {
   operationalEvents OperationalEvent[]
   activeForUsers    User[]                @relation("UserActiveWorkspace")
   apiKeys           ApiKey[]
+  contacts          Contact[]
+  tags              Tag[]
 
   @@index([ownerId])
+}
+
+/// A person the account has talked to, identified once rather than repeated on
+/// every log row. Until this existed there was no record of a human across
+/// conversations, which is what tags, segments, broadcasts and data collection
+/// all need to hang on.
+///
+/// Scoped to a connected account, not to the workspace: the same person
+/// messaging two of an agency's clients is two contacts, because the platform
+/// ids are per-account and one client must not see the other's audience.
+model Contact {
+  id                 String    @id @default(cuid())
+  workspaceId        String
+  instagramAccountId String
+  /// The platform-scoped user id. Unique per connected account, never global.
+  externalId         String
+  username           String?
+  name               String?
+  firstSeenAt        DateTime  @default(now())
+  lastSeenAt         DateTime  @default(now())
+  /// Denormalised so a contact list does not aggregate DmLog on every render.
+  dmCount            Int       @default(0)
+  lastDmAt           DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+  tags             ContactTag[]
+  dmLogs           DmLog[]
+
+  @@unique([instagramAccountId, externalId])
+  @@index([workspaceId])
+  @@index([instagramAccountId])
+  @@index([workspaceId, lastSeenAt])
+}
+
+/// A label the workspace defines. Tags are workspace-wide so the same label can
+/// be applied across every client account the workspace manages.
+model Tag {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  /// Optional swatch for the UI. Null renders in the neutral token.
+  color       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contacts  ContactTag[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+}
+
+/// Join row. Carries its own timestamp so "tagged in the last 7 days" is a
+/// answerable question without a separate audit table.
+model ContactTag {
+  contactId String
+  tagId     String
+  createdAt DateTime @default(now())
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([contactId, tagId])
+  @@index([tagId])
 }
 
 model WorkspaceMember {
@@ -160,22 +229,23 @@ model WorkspaceInvitation {
 }
 
 model InstagramAccount {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
   workspaceId       String
-  instagramId       String   @unique
+  instagramId       String    @unique
   username          String
   name              String?
   accessToken       String
   tokenExpiresAt    DateTime?
-  webhookSubscribed Boolean  @default(false)
-  connectedAt       DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  webhookSubscribed Boolean   @default(false)
+  connectedAt       DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  automations Automation[]
-  dmLogs      DmLog[]
-  linkClicks  LinkClick[]
+  workspace         Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  automations       Automation[]
+  dmLogs            DmLog[]
+  linkClicks        LinkClick[]
   followerSnapshots FollowerSnapshot[]
+  contacts          Contact[]
 
   @@index([workspaceId])
 }
@@ -201,57 +271,57 @@ model FollowerSnapshot {
 }
 
 model Automation {
-  id                 String   @id @default(cuid())
+  id                 String @id @default(cuid())
   workspaceId        String
   instagramAccountId String
 
-  name           String
-  goal           String?
-  postId         String?
-  postUrl        String?
-  pendingNextReel Boolean @default(false)
-  matchAnyPost   Boolean @default(false)
-  keywords       String[]
-  matchAnyWord   Boolean @default(false)
+  name                    String
+  goal                    String?
+  postId                  String?
+  postUrl                 String?
+  pendingNextReel         Boolean  @default(false)
+  matchAnyPost            Boolean  @default(false)
+  keywords                String[]
+  matchAnyWord            Boolean  @default(false)
   // Also fire this campaign when someone sends a DM whose text matches the
   // keywords above. Independent of the post trigger — a DM has no media, so
   // postId / matchAnyPost do not apply to it.
-  dmTriggerEnabled Boolean @default(false)
+  dmTriggerEnabled        Boolean  @default(false)
   // Fire when someone replies to one of your stories with matching text.
   // Instagram delivers this as a message, so keywords still apply.
-  storyReplyEnabled Boolean @default(false)
+  storyReplyEnabled       Boolean  @default(false)
   // Fire when someone mentions you in their story. There is no text to match
   // on, so the mention itself is the trigger and keywords are ignored.
-  storyMentionEnabled Boolean @default(false)
+  storyMentionEnabled     Boolean  @default(false)
   // Fire on matching comments during an Instagram Live broadcast.
-  liveCommentEnabled Boolean @default(false)
+  liveCommentEnabled      Boolean  @default(false)
   // Answer inbound DMs that matched no other campaign. At most one per
   // account should carry this, and it is only consulted after every keyword
   // campaign has declined the message.
-  defaultReplyEnabled Boolean @default(false)
+  defaultReplyEnabled     Boolean  @default(false)
   // Fire when someone opens a conversation through a link, QR code or website
   // button carrying this exact ref. Null means the campaign has no ref entry.
-  referralRef String?
-  dmMessage      String
-  openingDmEnabled     Boolean @default(false)
-  openingDmMessage     String?
-  openingDmButtonLabel String?
-  linkButtonLabel      String?
-  requireFollow           Boolean @default(false)
+  referralRef             String?
+  dmMessage               String
+  openingDmEnabled        Boolean  @default(false)
+  openingDmMessage        String?
+  openingDmButtonLabel    String?
+  linkButtonLabel         String?
+  requireFollow           Boolean  @default(false)
   followPromptMessage     String?
   followPromptButtonLabel String?
-  followUpEnabled Boolean @default(false)
-  followUpMessage String?
+  followUpEnabled         Boolean  @default(false)
+  followUpMessage         String?
   // Minutes to wait after the link is delivered before sending the follow-up.
   // 0 sends it right away.
-  followUpDelayMinutes Int @default(0)
-  publicReplyEnabled Boolean @default(false)
-  publicReplyMessage String?
-  publicReplyMessages String[] @default([])
-  isActive       Boolean @default(true)
-  wholeWordMatch Boolean @default(true)
-  reportShareSlug    String? @unique
-  reportShareEnabled Boolean @default(true)
+  followUpDelayMinutes    Int      @default(0)
+  publicReplyEnabled      Boolean  @default(false)
+  publicReplyMessage      String?
+  publicReplyMessages     String[] @default([])
+  isActive                Boolean  @default(true)
+  wholeWordMatch          Boolean  @default(true)
+  reportShareSlug         String?  @unique
+  reportShareEnabled      Boolean  @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -268,20 +338,24 @@ model Automation {
 }
 
 model DmLog {
-  id                 String     @id @default(cuid())
+  id                 String @id @default(cuid())
   workspaceId        String
   automationId       String
   instagramAccountId String
 
-  commenterId   String
-  commenterName String?
-  commentText   String
-  commentId     String
+  commenterId    String
+  commenterName  String?
+  /// Set once the contact layer resolves the recipient. Nullable because rows
+  /// written before contacts existed have no link, and a failed send may have
+  /// no resolvable person at all.
+  contactId      String?
+  commentText    String
+  commentId      String
   matchedKeyword String?
-  status        DmStatus @default(PENDING)
-  attempts      Int      @default(0)
-  dmSentAt      DateTime?
-  errorMessage  String?
+  status         DmStatus  @default(PENDING)
+  attempts       Int       @default(0)
+  dmSentAt       DateTime?
+  errorMessage   String?
 
   // The public comment reply is delivered independently of the DM, so its
   // outcome is tracked separately. publicReplySentAt makes it idempotent across
@@ -295,6 +369,7 @@ model DmLog {
   workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   automation       Automation       @relation(fields: [automationId], references: [id], onDelete: Cascade)
   instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+  contact          Contact?         @relation(fields: [contactId], references: [id], onDelete: SetNull)
 
   @@unique([automationId, commentId])
   @@index([workspaceId])
@@ -362,14 +437,14 @@ model LinkClick {
 }
 
 model WebhookEvent {
-  id          String        @id @default(cuid())
-  workspaceId String?
-  object      String?
-  payload     Json
-  status      WebhookStatus @default(PENDING)
+  id           String        @id @default(cuid())
+  workspaceId  String?
+  object       String?
+  payload      Json
+  status       WebhookStatus @default(PENDING)
   errorMessage String?
-  createdAt   DateTime      @default(now())
-  processedAt DateTime?
+  createdAt    DateTime      @default(now())
+  processedAt  DateTime?
 
   workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
 
@@ -378,13 +453,13 @@ model WebhookEvent {
 }
 
 model OperationalEvent {
-  id          String                @id @default(cuid())
+  id          String                 @id @default(cuid())
   workspaceId String?
   source      OperationalEventSource
-  level       OperationalEventLevel @default(INFO)
+  level       OperationalEventLevel  @default(INFO)
   message     String
   payload     Json?
-  createdAt   DateTime              @default(now())
+  createdAt   DateTime               @default(now())
   resolvedAt  DateTime?
 
   workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)

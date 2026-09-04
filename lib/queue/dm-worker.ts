@@ -26,6 +26,7 @@ import {
   sendPrivateReplyWithLinkButton,
 } from "@/lib/meta/client";
 import { decryptToken } from "@/lib/meta/oauth";
+import { recordContactDm, upsertContact } from "@/lib/contacts";
 import { matchKeywords } from "@/lib/utils/keyword-matcher";
 import { reserveDMSlot } from "@/lib/utils/rate-limiter";
 import {
@@ -1014,11 +1015,22 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
       continue;
     }
 
+    // Resolve the person behind this message before logging, so the row links
+    // to a contact rather than repeating a bare platform id. Returns null on
+    // failure and the send proceeds regardless: contact bookkeeping must never
+    // cost a recipient the DM they asked for.
+    const contact = await upsertContact({
+      workspaceId: automation.workspaceId,
+      instagramAccountId: automation.instagramAccountId,
+      externalId: senderId,
+    });
+
     const logBase = {
       workspaceId: automation.workspaceId,
       automationId: automation.id,
       instagramAccountId: automation.instagramAccountId,
       commenterId: senderId,
+      contactId: contact?.id ?? null,
       commentText: messageText,
       commentId: dedupeId,
       matchedKeyword: matchResult.matchedKeyword,
@@ -1176,6 +1188,9 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
           errorMessage: null,
         },
       });
+
+      // Counter moves only on an actual send, not on every event seen.
+      if (contact) await recordContactDm(contact.id);
     } catch (error) {
       await releaseWorkspaceDMReservation(
         automation.workspaceId,
