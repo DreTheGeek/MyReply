@@ -70,6 +70,13 @@ export interface ProcessMessageJob {
   // story triggers existed, which are treated as ordinary DMs. "default" is
   // never enqueued: the worker sets it on its own fallback pass.
   kind?: "dm" | "story_reply" | "story_mention" | "default";
+  /**
+   * Present when the message was a quick reply tap. The worker routes a
+   * recognised payload straight into the postback handler, so a tap runs the
+   * same reveal path as a button rather than being keyword-matched against the
+   * button's own title.
+   */
+  quickReplyPayload?: string;
 }
 
 export type DmQueueJob =

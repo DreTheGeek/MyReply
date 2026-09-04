@@ -121,6 +121,7 @@ model Workspace {
   apiKeys           ApiKey[]
   contacts          Contact[]
   tags              Tag[]
+  outboundMessages  OutboundMessage[]
   aiCredential      WorkspaceAiCredential?
 
   @@index([ownerId])
@@ -147,13 +148,20 @@ model Contact {
   /// Denormalised so a contact list does not aggregate DmLog on every render.
   dmCount            Int       @default(0)
   lastDmAt           DateTime?
+  /// Positive reactions this person has placed on messages we delivered.
+  /// Only "react" moves this; an "unreact" is a withdrawal, not a signal, so
+  /// it is deliberately not recorded and never decrements. Segmentation asks
+  /// "has this person ever reacted", which an unreact does not undo.
+  reactionCount      Int       @default(0)
+  lastReactionAt     DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+  workspace        Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  instagramAccount InstagramAccount  @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
   tags             ContactTag[]
   dmLogs           DmLog[]
+  outboundMessages OutboundMessage[]
 
   @@unique([instagramAccountId, externalId])
   @@index([workspaceId])
@@ -247,6 +255,7 @@ model InstagramAccount {
   linkClicks        LinkClick[]
   followerSnapshots FollowerSnapshot[]
   contacts          Contact[]
+  outboundMessages  OutboundMessage[]
 
   @@index([workspaceId])
 }
@@ -308,6 +317,16 @@ model Automation {
   openingDmMessage     String?
   openingDmButtonLabel String?
   linkButtonLabel      String?
+
+  /// Tappable quick replies carried by this campaign's DM, as a JSON array of
+  /// { title, type: "text" | "email" | "phone", payload }. Instagram shows at
+  /// most 13 and truncates a title at 20 characters. "email" and "phone" are
+  /// prefilled from the tapper's own profile, so they capture a contact detail
+  /// in one tap and carry no payload; a "text" button's payload names the
+  /// follow-up to send, and is routed through the same postback handler as an
+  /// opening DM button (for example `reveal:<campaign id>`).
+  quickRepliesEnabled  Boolean  @default(false)
+  quickReplies         Json?
 
   /// A publicly reachable image, video or PDF sent alongside the DM.
   /// Instagram fetches the URL itself, so anything behind auth, or a signed
@@ -376,12 +395,57 @@ model DmLog {
   automation       Automation       @relation(fields: [automationId], references: [id], onDelete: Cascade)
   instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
   contact          Contact?         @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  outboundMessages OutboundMessage[]
 
   @@unique([automationId, commentId])
   @@index([workspaceId])
   @@index([automationId])
   @@index([instagramAccountId])
   @@index([status])
+}
+
+/// A message the connected account sent, as Instagram echoed it back.
+///
+/// This is deliberately NOT DmLog. DmLog is automation-scoped by construction:
+/// `automationId` is a required foreign key and the row is keyed
+/// `@@unique([automationId, commentId])`. A reply an operator typed into the
+/// Instagram app belongs to no campaign, so storing it there would mean making
+/// automationId nullable, which breaks that unique key and every report,
+/// portal and analytics query that assumes a DmLog row means "a campaign did
+/// this". Outbound messages are a different fact, so they get their own table.
+///
+/// Keyed on Meta's `messageId`, which is one per real message. That is what
+/// makes recording an echo idempotent: Meta redelivers webhooks, and a
+/// redelivery finds the row already there rather than writing a second one.
+model OutboundMessage {
+  id                 String @id @default(cuid())
+  workspaceId        String
+  instagramAccountId String
+  /// Null when the recipient could not be resolved to a Contact. Recording the
+  /// message still matters more than the link.
+  contactId          String?
+  /// IGSID of the person the message went to.
+  recipientId        String
+  /// Meta's message id. Unique, so an echo can only ever be recorded once.
+  messageId          String @unique
+  text               String
+  source             OutboundMessageSource @default(MANUAL)
+  /// The DmLog row this echo belongs to, when MyReply sent it. Set so a
+  /// timeline that reads both tables can show one message rather than two.
+  dmLogId            String?
+  sentAt             DateTime
+  createdAt          DateTime @default(now())
+
+  workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+  contact          Contact?         @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  dmLog            DmLog?           @relation(fields: [dmLogId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([instagramAccountId])
+  @@index([contactId])
+  @@index([dmLogId])
+  @@index([instagramAccountId, recipientId, sentAt])
 }
 
 // Every comment the system has seen, from either the webhook or the polling
@@ -500,6 +564,14 @@ model WorkspaceAiCredential {
   lastUsedAt      DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+}
+
+/// Who actually sent an outbound message. AUTOMATION means MyReply sent it and
+/// a DmLog row already accounts for it; MANUAL means a human sent it from the
+/// Instagram app or anywhere else outside MyReply.
+enum OutboundMessageSource {
+  AUTOMATION
+  MANUAL
 }
 
 enum AiProvider {

@@ -5,6 +5,7 @@ import type { AccountOption } from "@/components/account-select";
 import { InstagramConnectNotice } from "@/components/instagram-connect-notice";
 import AiKeySection from "@/components/settings/ai-key-section";
 import ApiKeysSection from "@/components/settings/api-keys-section";
+import PersistentMenuSection from "@/components/settings/persistent-menu-section";
 
 interface SettingsData {
   workspace: {
@@ -640,6 +641,11 @@ export default function SettingsPage() {
           </form>
         )}
       </section>
+
+      <PersistentMenuSection
+        accounts={data?.instagramAccounts ?? []}
+        currentUserRole={membersData?.currentUserRole ?? null}
+      />
 
       <section id="ai-key" className="panel rounded p-4 sm:p-6">
         <AiKeySection />
