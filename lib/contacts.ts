@@ -63,6 +63,67 @@ export async function recordContactDm(contactId: string): Promise<void> {
   }
 }
 
+/**
+ * Record an outbound message observed on the echo webhook.
+ *
+ * `countTowardsDmTotal` is the whole point of the flag. MyReply's own sends are
+ * already counted on the send path by recordContactDm, and Instagram echoes
+ * every one of them straight back, so counting the echo too would show every
+ * automated DM twice. Only a message MyReply did not send is new information.
+ * `lastDmAt` moves either way, and never backwards, because the freshness of
+ * the conversation is true regardless of who typed the reply.
+ */
+export async function recordOutboundMessageSeen(params: {
+  contactId: string;
+  sentAt: Date;
+  countTowardsDmTotal: boolean;
+}): Promise<void> {
+  const { contactId, sentAt, countTowardsDmTotal } = params;
+
+  try {
+    const contact = await prisma.contact.findUnique({
+      where: { id: contactId },
+      select: { lastDmAt: true },
+    });
+    const shouldAdvance = !contact?.lastDmAt || contact.lastDmAt < sentAt;
+
+    await prisma.contact.update({
+      where: { id: contactId },
+      data: {
+        ...(countTowardsDmTotal ? { dmCount: { increment: 1 } } : {}),
+        ...(shouldAdvance ? { lastDmAt: sentAt } : {}),
+      },
+    });
+  } catch {
+    // Bookkeeping only. A failed counter must not fail webhook processing.
+  }
+}
+
+/**
+ * Record a positive reaction on a message we delivered.
+ *
+ * Only a "react" reaches here. An "unreact" is the withdrawal of a signal, not
+ * a signal of its own, so it is never recorded and never decrements: the
+ * question segmentation asks is whether this person has ever engaged, and
+ * taking a heart back does not make that untrue.
+ */
+export async function recordContactReaction(
+  contactId: string,
+  reactedAt: Date
+): Promise<void> {
+  try {
+    await prisma.contact.update({
+      where: { id: contactId },
+      data: {
+        reactionCount: { increment: 1 },
+        lastReactionAt: reactedAt,
+      },
+    });
+  } catch {
+    // Bookkeeping only. A failed counter must not fail webhook processing.
+  }
+}
+
 export function normalizeTagName(name: string): string {
   return name.trim().replace(/\s+/g, " ");
 }
