@@ -1,13 +1,84 @@
 # API and MCP
 
-Two ways for a program to drive MyReply: a REST API for your own code, and an
-MCP server so an AI agent can create and manage campaigns on your behalf.
+Two ways for a program to drive MyReply: an MCP server so an AI agent can
+create and manage campaigns on your behalf, and a REST API for your own code.
 
-Both authenticate with the same workspace-scoped API key, and both are limited
-to the workspace that key belongs to. A key can never reach another tenant's
-data, and nothing in either surface accepts a workspace id as an argument.
+Everything is scoped to one workspace. Neither surface accepts a workspace id
+as an argument, so a credential can never reach another tenant's data.
 
-## Getting a key
+## Connect an AI agent, no keys
+
+Paste this URL into any MCP client that supports OAuth and click Connect:
+
+```
+https://your-domain/api/mcp
+```
+
+In Claude Code that is one line, then one command:
+
+```bash
+claude mcp add --transport http myreply https://your-domain/api/mcp
+```
+
+```
+/mcp
+```
+
+Pick `myreply`, choose Authenticate, and a browser opens. In Claude on the web
+or the desktop app it is Settings, Connectors, Add custom connector, and the
+same URL. ChatGPT is Settings, Connectors, and the same URL again.
+
+You sign in to MyReply with your usual email link, pick which workspace the
+connection is for, and approve. There is no key to copy, store or rotate.
+
+What you are approving is spelled out on that screen: which app is asking,
+which host it sends you back to, which workspace it gets, and in plain words
+what it will be able to do. Two permissions exist:
+
+| Scope | What it allows |
+| --- | --- |
+| `mcp:read` | See connected accounts, campaigns, DM logs and click numbers. |
+| `mcp:write` | Create and change campaigns, edit their message, pause and resume them. |
+
+Your own role still applies on top. If you are a member rather than an admin of
+the workspace you pick, the connection stays read only whatever the app asked
+for. A scope can only ever take access away, never add it.
+
+Access tokens last an hour and refresh silently. Membership is re-checked on
+every call, so removing somebody from a workspace ends their connections with
+it immediately rather than whenever a token happens to lapse.
+
+### How the discovery works, if you are hosting this yourself
+
+Nothing needs configuring beyond `NEXTAUTH_URL`, which you already set for
+sign-in links. MyReply is its own authorization server and publishes:
+
+| Document | Path |
+| --- | --- |
+| Protected resource metadata, RFC 9728 | `/.well-known/oauth-protected-resource/api/mcp` |
+| Authorization server metadata, RFC 8414 | `/.well-known/oauth-authorization-server` |
+| Authorization endpoint, the consent screen | `/oauth/authorize` |
+| Token endpoint | `/api/oauth/token` |
+| Dynamic client registration, RFC 7591 | `/api/oauth/register` |
+| Token revocation, RFC 7009 | `/api/oauth/revoke` |
+
+A call to `/api/mcp` without a credential answers `401` with a
+`WWW-Authenticate` header pointing at the first of those. That header is what
+lets a client find everything else on its own.
+
+The flow is OAuth 2.1 authorization code with PKCE, `S256` only. There is no
+implicit grant, no password grant, and no client secret anywhere: every client
+is a public client. Tokens are audience-bound with RFC 8707 resource
+indicators, so a token minted for a different MCP server is refused here.
+Clients may register dynamically, which is what Claude and ChatGPT do today, or
+present an https URL as their `client_id` and let MyReply read the metadata
+document at it.
+
+## Getting a key, for scripts and headless clients
+
+An API key is still the right answer for a cron job, a server-to-server
+integration, or an MCP client with no browser to open. It is also what the REST
+API uses.
 
 Settings, API keys, Create key. Name it after whatever will hold it, so you
 know what breaks when you revoke it, and optionally give it an expiry and a
@@ -24,9 +95,8 @@ no owner key. Over REST, an `ADMIN` key can create, update, delete and import
 campaigns, while a `MEMBER` key is refused those writes with a 403 and can only
 read.
 
-The MCP surface does not apply that role today: any valid key can call the
-write tools there. So treat the role as a REST-side control rather than a
-sandbox, and give an MCP client a key you are happy to let write.
+The MCP surface applies the same ladder: a `MEMBER` key is not offered the
+write tools and is refused them if it calls one anyway.
 
 Keys look like `mr_live_...` and can be revoked at any time. Revoking stamps the
 key rather than deleting it, so the record of what existed and when it was last
@@ -37,9 +107,9 @@ passing.
 Authorization: Bearer mr_live_xxxxxxxxxxxxxxxxxxxx
 ```
 
-## MCP, for an AI agent
+## MCP with a key instead of OAuth
 
-Point any MCP client at:
+For a client that cannot open a browser, send the key as a header:
 
 ```
 url:     https://your-domain/api/mcp
@@ -53,7 +123,9 @@ claude mcp add --transport http myreply https://your-domain/api/mcp \
   --header "Authorization: Bearer mr_live_..."
 ```
 
-Then ask for what you want in plain language. A campaign in your own voice
+## Using the tools
+
+Ask for what you want in plain language. A campaign in your own voice
 looks like this:
 
 > Make me a campaign on my latest reel. Keyword GUIDE. DM people my lead

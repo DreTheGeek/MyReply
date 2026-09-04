@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRequestApiKeyContext } from "@/lib/auth";
 import { MCP_TOOLS, mcpToolsForRole, runMcpTool } from "@/lib/mcp/tools";
+import { corsPreflight } from "@/lib/oauth/errors";
+import {
+  authenticateMcpRequest,
+  insufficientScopeResponse,
+  toolNeedsWriteScope,
+} from "@/lib/oauth/mcp-auth";
+import { SCOPE_WRITE } from "@/lib/oauth/scopes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,12 +15,13 @@ export const dynamic = "force-dynamic";
  * MCP endpoint, JSON-RPC 2.0 over HTTP POST.
  *
  * Lets an AI agent read and write campaigns for one workspace. The workspace
- * comes from the API key, never from the request body, so a model cannot name
- * a tenant it was not given a key for.
+ * comes from the credential, never from the request body, so a model cannot
+ * name a tenant it was not given access to.
  *
- * Connect with:
+ * Two ways in, both resolving to the same workspace and role:
  *   url:     https://<domain>/api/mcp
- *   header:  Authorization: Bearer mr_live_...
+ *   OAuth:   paste the URL into a client and click Connect
+ *   API key: Authorization: Bearer mr_live_...
  */
 
 const PROTOCOL_VERSION = "2024-11-05";
@@ -48,14 +55,15 @@ export async function POST(request: NextRequest) {
     return new NextResponse(null, { status: 202 });
   }
 
-  const auth = await getRequestApiKeyContext();
-  if (!auth) {
-    return rpcError(
-      id,
-      -32001,
-      "Unauthorized. Send an API key as: Authorization: Bearer mr_live_..."
-    );
+  // A missing or bad credential answers with a real 401 carrying the RFC 9728
+  // WWW-Authenticate challenge, not a JSON-RPC error. That header is what tells
+  // a client where the authorization server is, and it is the difference
+  // between a client offering a Connect button and the user hunting for a key.
+  const authenticated = await authenticateMcpRequest(request);
+  if (!authenticated.ok) {
+    return authenticated.response;
   }
+  const auth = authenticated.credential;
 
   switch (method) {
     case "initialize":
@@ -79,6 +87,18 @@ export async function POST(request: NextRequest) {
 
       if (!MCP_TOOLS.some((tool) => tool.name === toolName)) {
         return rpcError(id, -32602, `Unknown tool: ${toolName}`);
+      }
+
+      // Scope is checked before the role gate, so an OAuth client that was
+      // never granted write access is told which scope it is missing rather
+      // than being told its role is too low. An API key carries no scopes and
+      // skips this: its role alone decides, exactly as it always did.
+      if (
+        auth.scopes !== null &&
+        toolNeedsWriteScope(toolName) &&
+        !auth.scopes.includes(SCOPE_WRITE)
+      ) {
+        return insufficientScopeResponse(request, toolName);
       }
 
       try {
@@ -116,7 +136,15 @@ export async function GET() {
     protocol: "mcp",
     protocolVersion: PROTOCOL_VERSION,
     transport: "http",
-    authentication: "Authorization: Bearer mr_live_...",
+    authentication: [
+      "OAuth 2.1 with PKCE, discovered from /.well-known/oauth-protected-resource/api/mcp",
+      "Authorization: Bearer mr_live_... for scripts and headless clients",
+    ],
     tools: MCP_TOOLS.map((tool) => tool.name),
   });
+}
+
+/** Browser-based MCP clients preflight before they can read WWW-Authenticate. */
+export async function OPTIONS() {
+  return corsPreflight();
 }

@@ -26,7 +26,22 @@ export function proxy(request: NextRequest) {
   }
 
   if (isLogin && isAuthenticated) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+    // Honour callbackUrl rather than always landing on the dashboard. The OAuth
+    // consent screen sends the user here with the pending authorization request
+    // in callbackUrl, so discarding it would drop the request and leave the
+    // client waiting on a Connect that silently never completes. This bites
+    // exactly when a session cookie is present but the session is not valid,
+    // which is the case this branch exists to catch.
+    //
+    // Only a same-origin absolute path is followed. A value starting with "//"
+    // is protocol relative and would resolve to another host, which is the
+    // classic open redirect, so it falls through to the dashboard.
+    const callbackUrl = request.nextUrl.searchParams.get("callbackUrl");
+    const target =
+      callbackUrl?.startsWith("/") && !callbackUrl.startsWith("//")
+        ? callbackUrl
+        : "/dashboard";
+    return NextResponse.redirect(new URL(target, request.url));
   }
 
   return NextResponse.next();
