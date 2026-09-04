@@ -21,12 +21,17 @@ import {
   sendDirectMessage,
   sendDirectMessageWithButton,
   sendDirectMessageWithLinkButton,
+  sendDirectMessageWithQuickReplies,
   sendPrivateReply,
   sendPrivateReplyWithButton,
   sendPrivateReplyWithLinkButton,
   sendAttachment,
   inferAttachmentType,
 } from "@/lib/meta/client";
+import {
+  isRoutablePostbackPayload,
+  parseQuickReplies,
+} from "@/lib/meta/quick-replies";
 import { decryptToken } from "@/lib/meta/oauth";
 import { recordContactDm, upsertContact } from "@/lib/contacts";
 import { matchKeywords } from "@/lib/utils/keyword-matcher";
@@ -118,6 +123,11 @@ type RevealAutomation = {
   attachmentUrl?: string | null;
   trackedLinks: WorkerTrackedLink[];
   instagramAccount: { instagramId: string };
+  // Quick replies come off a JSON column, so what is stored is genuinely
+  // unknown until parseQuickReplies has validated it. Optional because
+  // campaigns written before the field existed carry neither.
+  quickRepliesEnabled?: boolean;
+  quickReplies?: unknown;
 };
 
 /**
@@ -166,17 +176,37 @@ async function sendRevealDirectMessage(
   commenterName: string | null,
   context: string
 ): Promise<void> {
+  // Quick replies ride on a plain text message. A campaign that also has
+  // tracked links sends a button template instead, and Instagram carries one or
+  // the other on a message, not both, so the links win: they are the thing the
+  // recipient asked for.
+  const quickReplies = automation.quickRepliesEnabled
+    ? parseQuickReplies(automation.quickReplies)
+    : [];
+
   if (automation.trackedLinks.length === 0) {
-    await sendDirectMessage(
-      accessToken,
-      automation.instagramAccount.instagramId,
-      userId,
-      renderMessageWithTracking({
-        message: automation.dmMessage,
-        commenterName,
-        trackedLinks: automation.trackedLinks,
-      })
-    );
+    const text = renderMessageWithTracking({
+      message: automation.dmMessage,
+      commenterName,
+      trackedLinks: automation.trackedLinks,
+    });
+
+    if (quickReplies.length > 0) {
+      await sendDirectMessageWithQuickReplies(
+        accessToken,
+        automation.instagramAccount.instagramId,
+        userId,
+        text,
+        quickReplies
+      );
+    } else {
+      await sendDirectMessage(
+        accessToken,
+        automation.instagramAccount.instagramId,
+        userId,
+        text
+      );
+    }
     await sendAttachmentIfAny(accessToken, automation, userId, context);
     return;
   }
@@ -536,6 +566,30 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
             status: "SKIPPED_RATE_LIMIT",
             matchedKeyword: matchResult.matchedKeyword,
             errorMessage: "Hourly Instagram DM rate limit reached",
+          },
+        });
+        continue;
+      }
+
+      // A Live comment cannot be retried. Instagram only accepts a private
+      // reply to a Live comment while the broadcast is running, and the requeue
+      // delay is half an hour, so a retry lands after the stream has ended and
+      // fails. Worse, it would burn three attempts producing failures that look
+      // transient. Record it as skipped with a reason the operator can act on,
+      // which is to raise the cap or send fewer during a stream.
+      if (rateLimit.shouldRequeue && job.data.source === "LIVE") {
+        await prisma.dmLog.update({
+          where: {
+            automationId_commentId: {
+              automationId: automation.id,
+              commentId,
+            },
+          },
+          data: {
+            status: "SKIPPED_RATE_LIMIT",
+            matchedKeyword: matchResult.matchedKeyword,
+            errorMessage:
+              "Rate limit hit during a Live broadcast. Instagram only accepts a private reply while the stream is running, so this cannot be retried.",
           },
         });
         continue;
@@ -978,6 +1032,27 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
 }
 
 /**
+ * The payload of a quick reply the user just tapped, when the message carries
+ * one the postback handler can act on.
+ *
+ * Instagram delivers a quick reply tap as an ordinary message that also carries
+ * our payload, so it arrives on the message job rather than the postback one.
+ * The field is read off `unknown` on purpose: jobs enqueued before quick
+ * replies existed do not carry it, and neither does the queue's job type.
+ *
+ * A payload we cannot route (a campaign author typed a keyword rather than a
+ * campaign reference) returns null, and the tap falls through to the ordinary
+ * keyword path, because Instagram posts the button's title to the conversation
+ * as the user's own message.
+ */
+function readQuickReplyPayload(data: unknown): string | null {
+  if (typeof data !== "object" || data === null) return null;
+  const payload = (data as { quickReplyPayload?: unknown }).quickReplyPayload;
+  if (typeof payload !== "string" || payload.length === 0) return null;
+  return isRoutablePostbackPayload(payload) ? payload : null;
+}
+
+/**
  * Reply to an inbound DM whose text matches a campaign's keywords.
  *
  * The user has messaged us, so the conversation is already open: this path
@@ -989,6 +1064,23 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
   const { instagramAccountId, messageId, messageText, senderId } = job.data;
   // Jobs enqueued before story triggers existed carry no kind.
   const kind = job.data.kind ?? "dm";
+
+  // A quick reply tap already names the follow-up it wants, so it never goes
+  // near the keyword matcher. Hand it to the postback handler, which is what
+  // already resolves `reveal:` and `followcheck:` payloads, rather than
+  // standing up a second delivery path that would have to repeat its follow
+  // gate, usage reservation and logging.
+  const quickReplyPayload = readQuickReplyPayload(job.data);
+  if (quickReplyPayload) {
+    return processPostback({
+      ...job,
+      data: {
+        instagramAccountId,
+        userId: senderId,
+        payload: quickReplyPayload,
+      },
+    } as unknown as Job<ProcessPostbackJob>);
+  }
 
   // Each inbound surface has its own opt-in, so enabling story replies does
   // not silently start answering every DM, and vice versa. "default" is not a
