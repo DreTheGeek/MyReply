@@ -9,6 +9,10 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: process.env["DATABASE_URL"],
+    // Migrations need a session-mode connection. Supabase's transaction pooler
+    // (port 6543) cannot run them, but it is what the app uses at runtime,
+    // because session mode caps at 15 clients and serverless exhausts that.
+    // Falls back to DATABASE_URL so a single-connection setup still works.
+    url: process.env["DIRECT_URL"] ?? process.env["DATABASE_URL"],
   },
 });
