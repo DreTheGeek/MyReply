@@ -1,4 +1,4 @@
-// ManyChat Alternative — B2B Instagram Comment → DM SaaS schema
+// MyReply: B2B Instagram comment-to-DM SaaS schema
 
 generator client {
   provider = "prisma-client"
@@ -121,6 +121,7 @@ model Workspace {
   apiKeys           ApiKey[]
   contacts          Contact[]
   tags              Tag[]
+  aiCredential      WorkspaceAiCredential?
 
   @@index([ownerId])
 }
@@ -473,6 +474,37 @@ model OperationalEvent {
   @@index([source])
   @@index([level])
   @@index([createdAt])
+}
+
+/// One workspace's own AI provider credential. MyReply is bring your own key:
+/// Ask MyReply runs on this key and the tokens are billed to the workspace's
+/// own provider account. There is no shared MyReply key to fall back to, which
+/// is deliberate, a tenant can never spend another tenant's balance.
+///
+/// The secret is AES-256-GCM ciphertext under the same ENCRYPTION_KEY that
+/// protects Meta tokens, and it is never returned to a client once saved, not
+/// even to the owner who typed it. `keyHint` is a masked head and tail, enough
+/// for the UI to say which key is configured and useless to anyone who reads
+/// the row.
+model WorkspaceAiCredential {
+  id           String     @id @default(cuid())
+  workspaceId  String     @unique
+  workspace    Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  provider     AiProvider
+  encryptedKey String
+  keyHint      String
+  model        String
+  /// Audit stamp only. Deliberately not a foreign key: it records who set the
+  /// key rather than granting anything, so it should outlive the user row.
+  createdByUserId String?
+  lastUsedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+enum AiProvider {
+  ANTHROPIC
+  OPENROUTER
 }
 
 enum WorkspaceRole {
