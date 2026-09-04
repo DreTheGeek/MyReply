@@ -25,9 +25,33 @@
   --font-mono: var(--font-code), ui-monospace, monospace;
 }
 
-/* Dark is the default. Every token is declared here first, so nothing depends
-   on a media query or a class being present to have a value at all. */
+/* Light is the default and what everyone gets unless they explicitly opt into
+   dark. Every token is declared here first, so nothing depends on a media
+   query or a class being present in order to have a value at all.
+
+   Deliberately not wired to prefers-color-scheme: a visitor whose OS is dark
+   still gets the light page, because dark is opt-in rather than automatic. */
 :root {
+  --bg: #ffffff;
+  --surface: #f5f8f9;
+  --surface-hover: #eaf0f1;
+  --border: #dde4e6;
+  --border-hover: #c6d1d4;
+  --fg: #0f1416;
+  --muted: #5b686d;
+  /* Dark enough to clear 4.5:1 both as text on white and behind white text.
+     The hue is identical in both themes; only the lightness moves. */
+  --accent: #0b7c90;
+  --accent-hover: #096273;
+  --on-accent: #ffffff;
+  --success: #15795b;
+  --error: #a93a30;
+  --warning: #8a6216;
+}
+
+/* Dark, available only to a visitor who explicitly asks for it by putting
+   `dark` on <html>. Nothing turns this on automatically. */
+:root.dark {
   --bg: #0b0b0c;
   --surface: #141518;
   --surface-hover: #1c1e22;
@@ -41,52 +65,11 @@
   --success: #4ec89c;
   --error: #eb8079;
   --warning: #d9ac5c;
-}
-
-/* The light palette, defined once and applied in the two cases that call for
-   it: the visitor's OS prefers light and has made no explicit choice, or they
-   chose light here. Written as a mixin-by-repetition because CSS has no other
-   way to share a token block across selectors. */
-@media (prefers-color-scheme: light) {
-  :root:not(.dark) {
-    --bg: #ffffff;
-    --surface: #f5f8f9;
-    --surface-hover: #eaf0f1;
-    --border: #dde4e6;
-    --border-hover: #c6d1d4;
-    --fg: #0f1416;
-    --muted: #5b686d;
-    /* Darkened so this accent clears 4.5:1 both as text on white and behind
-       white text. The hue is identical to the dark theme's. */
-    --accent: #0b7c90;
-    --accent-hover: #096273;
-    --on-accent: #ffffff;
-    --success: #15795b;
-    --error: #a93a30;
-    --warning: #8a6216;
-    color-scheme: light;
-  }
-}
-
-:root.light {
-  --bg: #ffffff;
-  --surface: #f5f8f9;
-  --surface-hover: #eaf0f1;
-  --border: #dde4e6;
-  --border-hover: #c6d1d4;
-  --fg: #0f1416;
-  --muted: #5b686d;
-  --accent: #0b7c90;
-  --accent-hover: #096273;
-  --on-accent: #ffffff;
-  --success: #15795b;
-  --error: #a93a30;
-  --warning: #8a6216;
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 html {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
