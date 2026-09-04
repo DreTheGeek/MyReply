@@ -41,6 +41,8 @@ import {
   reserveWorkspaceDMSend,
 } from "@/lib/billing/usage";
 import { recordWorkerAlert } from "@/lib/ops/worker-health";
+import { answerInboundMessage } from "@/lib/ai/answering";
+import { getAnsweringSettings } from "@/lib/ai/answering-settings";
 import {
   buildTrackedUrl,
   renderMessageWithTracking,
@@ -1354,11 +1356,102 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
     }
   }
 
-  // Nothing wanted this message. Fall back to the default-reply campaign, if
-  // the account has one. Only for ordinary DMs: an unanswered story mention
+  // Nothing wanted this message. The assistant gets first refusal, then the
+  // default-reply campaign. Only for ordinary DMs: an unanswered story mention
   // should stay silent rather than trigger a generic reply.
   if (!anyMatched && kind === "dm") {
+    const answered = await tryAssistantAnswer(job);
+    if (answered) return;
     await runDefaultReply(job);
+  }
+}
+
+/**
+ * Try to answer an unmatched DM from the workspace's knowledge base.
+ *
+ * Returns true only when a reply was actually delivered, which is the one case
+ * where the default-reply campaign must not also fire: two messages for one
+ * inbound DM is worse than the generic one on its own.
+ *
+ * Everything here is wrapped, on purpose. The assistant is the newest and
+ * least proven thing in this pipeline and it sits directly in front of a
+ * campaign's send. Any failure inside it, a provider outage, a missing key, a
+ * bad row, a bug in retrieval, has to end as "false" so the default reply still
+ * goes out, and the failure is logged rather than swallowed.
+ *
+ * All of the policy lives in lib/ai/answering. This function's whole job is to
+ * find the account, resolve the contact and hand over a way to send.
+ */
+async function tryAssistantAnswer(job: Job<ProcessMessageJob>): Promise<boolean> {
+  const { instagramAccountId, messageId, messageText, senderId } = job.data;
+
+  try {
+    const account = await prisma.instagramAccount.findUnique({
+      where: { instagramId: instagramAccountId },
+      select: {
+        id: true,
+        instagramId: true,
+        accessToken: true,
+        workspaceId: true,
+        workspace: { select: { name: true } },
+      },
+    });
+    if (!account?.accessToken) return false;
+
+    const settings = await getAnsweringSettings(account.workspaceId);
+    if (!settings.enabled) return false;
+
+    const accessToken = decryptToken(account.accessToken);
+
+    const contact = await upsertContact({
+      workspaceId: account.workspaceId,
+      instagramAccountId: account.id,
+      externalId: senderId,
+    });
+
+    // An assistant reply is a DM the workspace sent, so it is counted like one.
+    const usage = await reserveWorkspaceDMSend(account.workspaceId);
+    if (!usage.allowed) return false;
+
+    let delivered = false;
+
+    const outcome = await answerInboundMessage({
+      workspaceId: account.workspaceId,
+      workspaceName: account.workspace.name,
+      instagramAccountId: account.id,
+      contactId: contact?.id ?? null,
+      recipientId: senderId,
+      messageId,
+      question: messageText,
+      // BullMQ stamps the job when it is enqueued, which is when the webhook
+      // arrived. That is the closest thing we have to when the customer hit
+      // send, and it is what the 24 hour window has to be measured from: a job
+      // that sat in a retry backoff overnight must not answer on a stale clock.
+      customerMessageAt: new Date(job.timestamp ?? Date.now()),
+      send: async (text: string): Promise<void> => {
+        await sendDirectMessage(
+          accessToken,
+          account.instagramId,
+          senderId,
+          text
+        );
+        delivered = true;
+      },
+    });
+
+    if (!delivered) {
+      await releaseWorkspaceDMReservation(account.workspaceId, usage.periodStart);
+    } else if (contact) {
+      await recordContactDm(contact.id);
+    }
+
+    return outcome.status === "sent";
+  } catch (error) {
+    console.error("[DM Worker] Assistant answer failed, falling through:", {
+      messageId,
+      name: error instanceof Error ? error.name : "unknown",
+    });
+    return false;
   }
 }
 

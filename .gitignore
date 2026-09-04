@@ -43,3 +43,7 @@ next-env.d.ts
 
 /app/generated/prisma
 .gstack/
+
+# Agent-written local permissions. Never committed: it would widen
+# permissions for everyone who clones.
+.claude/

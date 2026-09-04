@@ -128,7 +128,7 @@ export const agenciesSeoPage: SeoPageConfig = {
     "MyReply gives agencies multi-account workspaces, client-ready reports, tracked links, and a focused comment-to-DM workflow for repeatable Instagram campaigns.",
   primaryCta: "Start an agency workspace",
   bullets: [
-    "Connect multiple client Instagram accounts on the Agency plan.",
+    "Connect unlimited client Instagram accounts on Pro.",
     "Filter dashboards, logs, campaigns, and settings by account.",
     "Invite teammates as owners, admins, or members.",
     "Share read-only client reports without exposing workspace controls.",
@@ -151,7 +151,7 @@ export const agenciesSeoPage: SeoPageConfig = {
   comparisons: [
     {
       label: "Client reporting",
-      ours: "Public read-only campaign report links, unbranded, with no plan gating.",
+      ours: "Public read-only campaign report links, with no per-contact fee behind them.",
       other: "Manual screenshots or dashboards that expose too much internal workspace context.",
     },
     {
@@ -169,7 +169,7 @@ export const agenciesSeoPage: SeoPageConfig = {
   faqs: [
     {
       title: "How many Instagram accounts can agencies connect?",
-      body: "The Agency plan is shaped for up to 10 connected Instagram professional accounts in the current launch packaging.",
+      body: "As many as you need. Free covers one account in full, and Pro removes the limit rather than raising it to a number.",
     },
     {
       title: "Can clients see reports without logging in?",

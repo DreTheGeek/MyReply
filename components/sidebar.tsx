@@ -28,6 +28,7 @@ const navItems: NavItem[] = [
   { label: "Inbox", href: "/inbox" },
   { label: "Campaigns", href: "/campaigns" },
   { label: "Contacts", href: "/contacts" },
+  { label: "Answers", href: "/answers" },
   { label: "DM Logs", href: "/logs" },
   { label: "Settings", href: "/settings" },
   { label: "Diagnostics", href: "/diagnostics" },

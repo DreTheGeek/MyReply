@@ -6,6 +6,8 @@ import { InstagramConnectNotice } from "@/components/instagram-connect-notice";
 import AiKeySection from "@/components/settings/ai-key-section";
 import ApiKeysSection from "@/components/settings/api-keys-section";
 import PersistentMenuSection from "@/components/settings/persistent-menu-section";
+import KnowledgeSection from "@/components/settings/knowledge-section";
+import AnsweringSection from "@/components/settings/answering-section";
 
 interface SettingsData {
   workspace: {
@@ -646,6 +648,10 @@ export default function SettingsPage() {
         accounts={data?.instagramAccounts ?? []}
         currentUserRole={membersData?.currentUserRole ?? null}
       />
+
+      <KnowledgeSection currentUserRole={membersData?.currentUserRole ?? null} />
+
+      <AnsweringSection currentUserRole={membersData?.currentUserRole ?? null} />
 
       <section id="ai-key" className="panel rounded p-4 sm:p-6">
         <AiKeySection />

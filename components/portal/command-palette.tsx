@@ -25,6 +25,7 @@ const COMMANDS: Command[] = [
   { id: "inbox", label: "Inbox", group: "Go to", href: "/inbox", keywords: "conversations messages dm" },
   { id: "campaigns", label: "Campaigns", group: "Go to", href: "/campaigns", keywords: "automations keywords triggers" },
   { id: "contacts", label: "Contacts", group: "Go to", href: "/contacts", keywords: "people audience tags" },
+  { id: "answers", label: "Answers", group: "Go to", href: "/answers", keywords: "ai review corrections knowledge handoff" },
   { id: "logs", label: "DM logs", group: "Go to", href: "/logs", keywords: "delivery sends failures history" },
   { id: "diagnostics", label: "Diagnostics", group: "Go to", href: "/diagnostics", keywords: "health worker queue redis alerts" },
   { id: "settings", label: "Settings", group: "Go to", href: "/settings", keywords: "team workspace account preferences" },

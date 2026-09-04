@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
+import PricingTable from "@/components/pricing-table";
 
 export const metadata: Metadata = {
   title: "MyReply: Instagram comment-to-DM for agencies",
@@ -60,13 +61,6 @@ const features = [
     title: "Tracked links on everything",
     body: "Each link is wrapped and every click attributed to the campaign, the account and the workspace it came from.",
   },
-];
-
-const pricingCompare: Array<[string, string, string]> = [
-  ["250", "$17", "$16"],
-  ["1,000", "$92", "$16"],
-  ["10,000", "$161", "$16"],
-  ["25,000", "$199", "$16"],
 ];
 
 const faqs = [
@@ -445,102 +439,25 @@ export default function Home() {
           Pricing
         </p>
         <h2 className="mt-3 max-w-2xl text-balance font-display text-3xl font-bold leading-tight sm:text-4xl">
-          Your bill does not grow when your campaign does.
+          Free is not a trial. It is most of the product.
         </h2>
+        <p className="mt-4 max-w-2xl text-muted">
+          Our rule is simple. If a feature does not cost us money every time you
+          use it, it is free and it is uncapped. That covers automations,
+          contacts, DMs, tags, every trigger, quick replies, the persistent
+          menu, conversation starters, tracked links, the inbox, analytics and
+          reports, the REST API, the MCP server, and AI running on your own
+          provider key.
+        </p>
+        <p className="mt-4 max-w-2xl text-muted">
+          Where the rest of the category meters contacts, we do not count them
+          at all, so a campaign that works does not raise your bill. Pro exists
+          for the two things that genuinely cost us something: AI we pay the
+          provider for, and the surfaces built for a team.
+        </p>
 
-        <div className="mt-10 grid gap-4 md:grid-cols-2">
-          <div className="rounded-lg border border-border bg-surface p-7">
-            <h3 className="font-display text-xl font-bold">Free</h3>
-            <p className="mt-1 text-sm text-muted">
-              For one account, forever.
-            </p>
-            <p className="mt-6 font-display text-4xl font-bold tabular-nums">
-              $0
-            </p>
-            <ul className="mt-6 space-y-2.5 text-sm text-muted">
-              <li>One connected Instagram account</li>
-              <li>Unlimited automations</li>
-              <li>Unlimited contacts and DMs</li>
-              <li>Tracked links and full DM logs</li>
-              <li>No branding on your messages</li>
-            </ul>
-            <Link
-              href="/login"
-              className="mt-7 inline-flex w-full items-center justify-center rounded-md border border-border px-5 py-2.5 text-sm font-semibold transition hover:border-border-hover hover:bg-surface-hover"
-            >
-              Start free
-            </Link>
-          </div>
-
-          <div className="rounded-lg border border-accent bg-surface p-7">
-            <div className="flex items-center justify-between">
-              <h3 className="font-display text-xl font-bold">Pro</h3>
-              <span className="rounded-full bg-accent px-2.5 py-1 font-mono text-[11px] font-semibold uppercase tracking-wide text-on-accent">
-                For agencies
-              </span>
-            </div>
-            <p className="mt-1 text-sm text-muted">
-              For running more than one account.
-            </p>
-            <p className="mt-6 font-display text-4xl font-bold tabular-nums">
-              $16
-              <span className="ml-1 text-base font-medium text-muted">
-                /month
-              </span>
-            </p>
-            <p className="mt-1 text-sm text-muted">
-              Or $13 a month billed annually, which is two months free.
-            </p>
-            <ul className="mt-6 space-y-2.5 text-sm text-muted">
-              <li>Everything in Free</li>
-              <li>Unlimited connected accounts</li>
-              <li>A separate workspace per client</li>
-              <li>Team members with roles</li>
-              <li>Client reports under your own brand</li>
-            </ul>
-            <Link
-              href="/login"
-              className="mt-7 inline-flex w-full items-center justify-center rounded-md bg-accent px-5 py-2.5 text-sm font-semibold text-on-accent transition hover:bg-accent-hover"
-            >
-              Start free
-            </Link>
-          </div>
-        </div>
-
-        <div className="mt-10 overflow-x-auto rounded-lg border border-border">
-          <table className="w-full min-w-[34rem] text-sm">
-            <caption className="border-b border-border bg-surface px-5 py-3 text-left text-sm text-muted">
-              What the same month costs elsewhere, once a campaign works.
-            </caption>
-            <thead>
-              <tr className="border-b border-border bg-surface text-left">
-                <th className="px-5 py-3 font-mono text-xs font-medium uppercase tracking-wide text-muted">
-                  People reached
-                </th>
-                <th className="px-5 py-3 font-mono text-xs font-medium uppercase tracking-wide text-muted">
-                  Per-contact pricing
-                </th>
-                <th className="px-5 py-3 font-mono text-xs font-medium uppercase tracking-wide text-muted">
-                  MyReply Pro
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {pricingCompare.map(([contacts, them, us]) => (
-                <tr key={contacts} className="border-b border-border last:border-0">
-                  <td className="px-5 py-3 font-mono tabular-nums text-foreground">
-                    {contacts}
-                  </td>
-                  <td className="px-5 py-3 font-mono tabular-nums text-muted">
-                    {them}
-                  </td>
-                  <td className="px-5 py-3 font-mono font-semibold tabular-nums text-accent">
-                    {us}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="mt-10">
+          <PricingTable />
         </div>
       </section>
 
