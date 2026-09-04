@@ -20,6 +20,7 @@
  */
 
 import type { KnowledgeStatus } from "@/app/generated/prisma/client";
+import { embedChunksForSource } from "@/lib/ai/embeddings";
 import { prisma } from "@/lib/db/client";
 import { chunkQuestionAndAnswer, chunkText, type TextChunk } from "./chunk";
 import { CrawlError, crawlSite, type CrawlOptions } from "./crawl";
@@ -82,6 +83,13 @@ async function commitChunks(
       },
     }),
   ]);
+
+  // Embed outside the transaction, on purpose. The passages are already
+  // committed and retrieval works on them lexically the moment they land, so an
+  // embedder that is slow, unreachable or not yet deployed must not roll back
+  // an ingest that otherwise succeeded. This never throws: it leaves embedding
+  // null and the backfill picks those rows up later.
+  await embedChunksForSource(sourceId);
 
   return { status: "READY", chunkCount: capped.length, errorMessage: null };
 }

@@ -30,6 +30,9 @@ model User {
   sentInvitations  WorkspaceInvitation[] @relation("WorkspaceInvitationsSent")
   activeWorkspace  Workspace?            @relation("UserActiveWorkspace", fields: [activeWorkspaceId], references: [id], onDelete: SetNull)
   createdApiKeys   ApiKey[]              @relation("ApiKeyCreatedBy")
+
+  oauthAuthorizationCodes OAuthAuthorizationCode[]
+  oauthTokens             OAuthToken[]
 }
 
 /// A machine credential scoped to one workspace, for the public API and for
@@ -129,6 +132,9 @@ model Workspace {
   assistantAnswers  AssistantAnswer[]
   outboundMessages  OutboundMessage[]
   aiCredential      WorkspaceAiCredential?
+
+  oauthAuthorizationCodes OAuthAuthorizationCode[]
+  oauthTokens             OAuthToken[]
 
   @@index([ownerId])
 }
@@ -670,6 +676,19 @@ model KnowledgeChunk {
   content  String
   /// Where this passage came from, for the citation shown under an answer.
   citation String?
+  /// gte-small embedding of `content`, 384 dimensions, produced by the
+  /// supabase/functions/embed Edge Function. Prisma has no native vector type,
+  /// so it is declared Unsupported: the client can neither select nor filter
+  /// it, which is why lib/ai/retrieval.ts and lib/ai/embeddings.ts reach it
+  /// through raw SQL. Everything else about this model is unaffected, and an
+  /// Unsupported column is left out of the default selection set, so existing
+  /// queries and `createMany` keep working untouched.
+  ///
+  /// Nullable, and it has to stay nullable. Chunks ingested before this column
+  /// existed have no vector and must keep retrieving through BM25, and an
+  /// ingest that runs while the embedder is unreachable has to be able to store
+  /// its passages anyway.
+  embedding Unsupported("vector(384)")?
   createdAt DateTime @default(now())
 
   source KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
@@ -724,4 +743,135 @@ enum AnswerVerdict {
 enum WorkspacePlan {
   FREE
   PRO
+}
+
+/// How an OAuth client came to exist. DYNAMIC is RFC 7591 dynamic client
+/// registration, which is what Claude and ChatGPT use today. METADATA_DOCUMENT
+/// is a Client ID Metadata Document: the client_id is itself an https URL whose
+/// JSON document we fetch and re-read periodically, so nothing is registered.
+enum OAuthClientRegistration {
+  DYNAMIC
+  METADATA_DOCUMENT
+}
+
+enum OAuthTokenType {
+  ACCESS
+  REFRESH
+}
+
+/// An MCP client that may ask a MyReply user for access.
+///
+/// Deliberately holds no client secret. Every client here is a public client
+/// that must use PKCE, which is what MCP clients are in practice, and it means
+/// there is no shared secret to leak, rotate or accidentally log.
+model OAuthClient {
+  id String @id @default(cuid())
+
+  /// The public identifier. A generated `mrc_...` for a dynamically registered
+  /// client, or the https URL of the metadata document for the other kind.
+  clientId     String                  @unique
+  registration OAuthClientRegistration @default(DYNAMIC)
+
+  clientName              String
+  clientUri               String?
+  logoUri                 String?
+  /// Matched exactly at authorize time. No prefixes, no wildcards.
+  redirectUris            String[]
+  /// The most this client may ever be granted, space separated.
+  scope                   String   @default("mcp:read mcp:write")
+  grantTypes              String[]
+  responseTypes           String[]
+  tokenEndpointAuthMethod String   @default("none")
+
+  /// When the metadata document was last read. Null for a registered client.
+  metadataFetchedAt DateTime?
+  /// Set to stop a client without losing the record of what it did.
+  disabledAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  authorizationCodes OAuthAuthorizationCode[]
+  tokens             OAuthToken[]
+
+  @@index([registration])
+}
+
+/// A one-time authorization code. Short lived, single use, and bound to the
+/// PKCE challenge, the redirect_uri, the scope, the resource, the user and the
+/// workspace it was approved for. Only the SHA-256 of the code is stored, the
+/// same discipline API keys use, so a dumped row cannot be redeemed.
+model OAuthAuthorizationCode {
+  id         String @id @default(cuid())
+  hashedCode String @unique
+
+  clientRecordId String
+  client         OAuthClient @relation(fields: [clientRecordId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  redirectUri         String
+  scope               String
+  /// RFC 8707 resource indicator. The audience every token minted from this
+  /// code is bound to.
+  resource            String
+  codeChallenge       String
+  codeChallengeMethod String @default("S256")
+
+  expiresAt  DateTime
+  /// Stamped the first time the code is redeemed. A second redemption finds
+  /// this set, fails, and revokes everything the first redemption issued.
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  tokens OAuthToken[]
+
+  @@index([clientRecordId])
+  @@index([userId])
+  @@index([workspaceId])
+  @@index([expiresAt])
+}
+
+/// An access or refresh token. Hashed at rest exactly like an API key, and
+/// audience bound through `resource` so a token minted for another server is
+/// refused here rather than quietly accepted.
+model OAuthToken {
+  id          String         @id @default(cuid())
+  type        OAuthTokenType
+  hashedToken String         @unique
+
+  clientRecordId String
+  client         OAuthClient @relation(fields: [clientRecordId], references: [id], onDelete: Cascade)
+
+  /// The code this grant started from. Used as the family id: a replayed code
+  /// or a reused refresh token revokes every token sharing it.
+  authorizationCodeId String?
+  authorizationCode   OAuthAuthorizationCode? @relation(fields: [authorizationCodeId], references: [id], onDelete: SetNull)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  scope    String
+  resource String
+
+  expiresAt DateTime
+  /// Refresh tokens only: when this one was spent on a rotation. Presenting a
+  /// spent token again is reuse, and revokes the whole family.
+  usedAt     DateTime?
+  revokedAt  DateTime?
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([clientRecordId])
+  @@index([userId])
+  @@index([workspaceId])
+  @@index([authorizationCodeId])
+  @@index([type, expiresAt])
 }

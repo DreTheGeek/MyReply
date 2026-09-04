@@ -1,0 +1,14 @@
+# Supabase CLI configuration.
+#
+# Only the pieces MyReply actually owns are declared here. The database, its
+# extensions and its migrations are managed by Prisma against DIRECT_URL, so
+# there is no [db] section and `supabase db push` is not part of this project's
+# workflow. What lives here is the Edge Function that turns text into vectors.
+project_id = "openreply"
+
+[functions.embed]
+# The platform gate. Supabase rejects any request that does not carry a valid
+# project key before our code runs. That is necessary and not sufficient: the
+# anon key is public by design, so the function checks a shared secret of its
+# own as well. See supabase/functions/embed/index.ts.
+verify_jwt = true
