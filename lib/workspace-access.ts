@@ -1,5 +1,5 @@
 import type { Workspace, WorkspaceRole } from "@/app/generated/prisma/client";
-import { getCurrentUserId } from "@/lib/auth";
+import { getCurrentUserId, getRequestApiKeyContext } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
 import { ensureWorkspaceForUser, getWorkspaceMembership } from "@/lib/workspace";
 
@@ -32,6 +32,23 @@ export function canManageBilling(role: WorkspaceRole) {
 }
 
 export async function getCurrentWorkspaceContext(): Promise<WorkspaceContext | null> {
+  // Machine callers carry their workspace and role on the key itself. There is
+  // no user behind them, so userId is empty and role gating uses the key's role.
+  const apiKeyContext = await getRequestApiKeyContext();
+  if (apiKeyContext) {
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: apiKeyContext.workspaceId },
+    });
+    if (!workspace) return null;
+
+    return {
+      userId: "",
+      workspaceId: workspace.id,
+      workspace,
+      role: apiKeyContext.role,
+    };
+  }
+
   const userId = await getCurrentUserId();
   if (!userId) return null;
 

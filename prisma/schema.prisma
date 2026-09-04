@@ -29,6 +29,33 @@ model User {
   workspaceMembers  WorkspaceMember[]
   sentInvitations   WorkspaceInvitation[] @relation("WorkspaceInvitationsSent")
   activeWorkspace   Workspace?        @relation("UserActiveWorkspace", fields: [activeWorkspaceId], references: [id], onDelete: SetNull)
+  createdApiKeys    ApiKey[]          @relation("ApiKeyCreatedBy")
+}
+
+/// A machine credential scoped to one workspace, for the public API and for
+/// embedding MyReply inside another product. Only the SHA-256 hash is stored,
+/// so a leaked database row cannot be replayed as a key. `prefix` is the
+/// human-readable head of the key, kept solely so the UI can tell keys apart.
+model ApiKey {
+  id              String        @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name            String
+  prefix          String
+  hashedKey       String        @unique
+  /// The workspace role this key acts with. Reuses the same RBAC ladder as a
+  /// human member, so canManageWorkspace applies unchanged.
+  role            WorkspaceRole @default(ADMIN)
+  createdByUserId String?
+  createdBy       User?         @relation("ApiKeyCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  lastUsedAt      DateTime?
+  expiresAt       DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([workspaceId])
+  @@index([createdByUserId])
 }
 
 model Account {
@@ -91,6 +118,7 @@ model Workspace {
   webhookEvents     WebhookEvent[]
   operationalEvents OperationalEvent[]
   activeForUsers    User[]                @relation("UserActiveWorkspace")
+  apiKeys           ApiKey[]
 
   @@index([ownerId])
 }
