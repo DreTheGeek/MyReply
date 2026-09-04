@@ -1,6 +1,12 @@
 import { getMetaGraphApiVersion, requireEnv } from "@/lib/env";
+import {
+  toMetaQuickReplies,
+  type QuickReply,
+} from "@/lib/meta/quick-replies";
 
-function instagramGraphBase() {
+// Exported so sibling modules (lib/meta/persistent-menu.ts) build their URLs
+// from the same base rather than keeping a second copy of it.
+export function instagramGraphBase() {
   return `https://graph.instagram.com/${getMetaGraphApiVersion()}`;
 }
 
@@ -108,7 +114,10 @@ interface TokenResponse {
   expires_in?: number;
 }
 
-async function handleResponse<T>(response: Response): Promise<T> {
+// Exported so sibling modules classify Meta's failures identically. A second
+// copy of this mapping would drift, and the error class is what callers switch
+// on to tell an expired token from a missing permission.
+export async function handleResponse<T>(response: Response): Promise<T> {
   const data = await response.json();
 
   if (!response.ok || (data as GraphApiError).error) {
@@ -410,6 +419,83 @@ export async function sendDirectMessage(
       body: JSON.stringify({
         recipient: { id: userId },
         message: { text: message },
+      }),
+    }
+  );
+
+  return handleResponse(response);
+}
+
+/**
+ * Send a direct message with tappable quick replies underneath it.
+ *
+ * The buttons ride on the message itself rather than on an attachment, which is
+ * the shape Instagram documents. On tap, Instagram posts the button's title to
+ * the conversation as the user's own message and sends us a webhook carrying
+ * that title and the button's payload.
+ *
+ * The list is capped at 13 and titles truncated to 20 characters by
+ * toMetaQuickReplies, so a campaign with an over-long label sends a shortened
+ * button instead of failing the whole DM.
+ */
+export async function sendDirectMessageWithQuickReplies(
+  accessToken: string,
+  instagramAccountId: string,
+  userId: string,
+  text: string,
+  quickReplies: QuickReply[]
+): Promise<{ recipient_id: string; message_id: string }> {
+  const response = await fetch(
+    `${instagramGraphBase()}/${instagramAccountId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        recipient: { id: userId },
+        message: {
+          text,
+          quick_replies: toMetaQuickReplies(quickReplies),
+        },
+      }),
+    }
+  );
+
+  return handleResponse(response);
+}
+
+/**
+ * Send a private reply to a comment with quick replies underneath it.
+ *
+ * Same message shape as the direct-message sender, addressed to a comment
+ * instead of a user. Note that Instagram allows exactly one private reply per
+ * comment, ever, so a caller here has no second attempt if Meta refuses the
+ * message: the DM worker deliberately keeps quick replies on the direct-message
+ * path, where a rejected send can be retried.
+ */
+export async function sendPrivateReplyWithQuickReplies(
+  accessToken: string,
+  instagramAccountId: string,
+  commentId: string,
+  text: string,
+  quickReplies: QuickReply[]
+): Promise<{ recipient_id: string; message_id: string }> {
+  const response = await fetch(
+    `${instagramGraphBase()}/${instagramAccountId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        recipient: { comment_id: commentId },
+        message: {
+          text,
+          quick_replies: toMetaQuickReplies(quickReplies),
+        },
       }),
     }
   );
@@ -796,6 +882,30 @@ export async function refreshLongLivedToken(
   };
 }
 
+/**
+ * Every webhook field the app parses.
+ *
+ * This list previously held only comments and messages, while the webhook
+ * parser handled six more. Meta delivers only what the account is explicitly
+ * subscribed to, so Live comment triggers, referral arrivals, mentions and
+ * reactions were being parsed by code that never received an event. Anything
+ * added to lib/meta/webhook.ts must be added here too or it is dead on arrival.
+ *
+ * Names are exact. Meta rejects the whole call if one is wrong, and it is
+ * message_edit rather than message_edits.
+ */
+export const WEBHOOK_FIELDS = [
+  "comments",
+  "live_comments",
+  "messages",
+  "messaging_postbacks",
+  "messaging_referral",
+  "messaging_seen",
+  "message_reactions",
+  "message_edit",
+  "mentions",
+] as const;
+
 export async function subscribeInstagramAccountToWebhooks(
   instagramAccountId: string,
   accessToken: string
@@ -809,7 +919,7 @@ export async function subscribeInstagramAccountToWebhooks(
         Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
-        subscribed_fields: ["comments", "messages"],
+        subscribed_fields: WEBHOOK_FIELDS,
       }),
     }
   );

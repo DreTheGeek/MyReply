@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
 import { decryptToken, encryptToken } from "@/lib/meta/oauth";
-import { refreshLongLivedToken } from "@/lib/meta/client";
+import {
+  refreshLongLivedToken,
+  subscribeInstagramAccountToWebhooks,
+} from "@/lib/meta/client";
 
 const DAYS_BEFORE_EXPIRY = 10;
 
@@ -41,6 +44,7 @@ export async function GET(request: NextRequest) {
       id: true,
       workspaceId: true,
       username: true,
+      instagramId: true,
       accessToken: true,
     },
   });
@@ -67,6 +71,25 @@ export async function GET(request: NextRequest) {
           tokenExpiresAt: newExpiry,
         },
       });
+
+      // Re-assert the webhook field subscription while we hold a fresh token.
+      // An account connected before a field was added to WEBHOOK_FIELDS stays
+      // subscribed to the old, shorter list forever otherwise, and the symptom
+      // is a trigger that silently never fires. Failure here must not fail the
+      // refresh, which is the job that actually keeps the account working.
+      try {
+        await subscribeInstagramAccountToWebhooks(
+          newToken,
+          account.instagramId
+        );
+      } catch (subscribeError) {
+        console.warn(
+          `[cron] Webhook resubscribe failed for @${account.username}:`,
+          subscribeError instanceof Error
+            ? subscribeError.message
+            : "Unknown error"
+        );
+      }
 
       results.push({
         instagramAccountId: account.id,
