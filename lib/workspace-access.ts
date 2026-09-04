@@ -1,7 +1,7 @@
 import type { Workspace, WorkspaceRole } from "@/app/generated/prisma/client";
 import { getCurrentUserId } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
-import { ensureWorkspaceForUser } from "@/lib/workspace";
+import { ensureWorkspaceForUser, getWorkspaceMembership } from "@/lib/workspace";
 
 export type WorkspaceContext = {
   userId: string;
@@ -35,16 +35,14 @@ export async function getCurrentWorkspaceContext(): Promise<WorkspaceContext | n
   const userId = await getCurrentUserId();
   if (!userId) return null;
 
-  const membership = await prisma.workspaceMember.findFirst({
-    where: { userId },
-    include: { workspace: true },
-    orderBy: { createdAt: "asc" },
-  });
+  // Shares one resolver with getCurrentWorkspaceId so the active-workspace
+  // preference and its membership re-check cannot drift between the two.
+  const membership = await getWorkspaceMembership(userId);
 
   if (membership) {
     return {
       userId,
-      workspaceId: membership.workspaceId,
+      workspaceId: membership.workspace.id,
       workspace: membership.workspace,
       role: membership.role,
     };

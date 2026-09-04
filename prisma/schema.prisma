@@ -18,11 +18,17 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
+  // Which workspace this user is currently acting in. Null means fall back to
+  // their oldest membership. This is a preference, never a grant: every read
+  // re-checks WorkspaceMember, so a stale or revoked id gives no access.
+  activeWorkspaceId String?
+
   accounts          Account[]
   sessions          Session[]
   ownedWorkspaces   Workspace[]       @relation("WorkspaceOwner")
   workspaceMembers  WorkspaceMember[]
   sentInvitations   WorkspaceInvitation[] @relation("WorkspaceInvitationsSent")
+  activeWorkspace   Workspace?        @relation("UserActiveWorkspace", fields: [activeWorkspaceId], references: [id], onDelete: SetNull)
 }
 
 model Account {
@@ -84,6 +90,7 @@ model Workspace {
   linkClicks        LinkClick[]
   webhookEvents     WebhookEvent[]
   operationalEvents OperationalEvent[]
+  activeForUsers    User[]                @relation("UserActiveWorkspace")
 
   @@index([ownerId])
 }
