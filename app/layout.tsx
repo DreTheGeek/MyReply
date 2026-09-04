@@ -48,7 +48,21 @@ export default function RootLayout({
     <html
       lang="en"
       className={`h-full ${display.variable} ${body.variable} ${mono.variable}`}
+      suppressHydrationWarning
     >
+      <head>
+        {/*
+          Applies the saved theme before first paint. Without this the page
+          renders light and then snaps to dark, which is worse than no toggle
+          at all. Light stays the default: only an explicit stored choice of
+          "dark" turns dark on, never the OS setting.
+        */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{if(localStorage.getItem("myreply-theme")==="dark"){document.documentElement.classList.add("dark")}}catch(e){}`,
+          }}
+        />
+      </head>
       <body className="min-h-full bg-background text-foreground font-sans antialiased">
         {children}
         <Analytics />

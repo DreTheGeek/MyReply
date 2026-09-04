@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import DashboardShell from "@/components/dashboard-shell";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
-import { ensureWorkspaceForUser } from "@/lib/workspace";
+import { ensureWorkspaceForUser, getWorkspaceMembership } from "@/lib/workspace";
 
 export default async function DashboardLayout({
   children,
@@ -19,6 +19,11 @@ export default async function DashboardLayout({
     session.user.id,
     session.user.email
   );
+
+  // The membership is read after ensure so a first-time user, whose workspace
+  // is created by that call, still resolves to a role rather than to null.
+  const membership = await getWorkspaceMembership(session.user.id);
+
   const accounts = await prisma.instagramAccount.findMany({
     where: { workspaceId: workspace.id },
     orderBy: { connectedAt: "desc" },
@@ -31,6 +36,9 @@ export default async function DashboardLayout({
       workspaceId={workspace.id}
       instagramUsername={accounts[0]?.username ?? null}
       instagramAccountCount={accounts.length}
+      userName={session.user.name ?? null}
+      userEmail={session.user.email ?? null}
+      role={membership?.role ?? "MEMBER"}
     >
       {children}
     </DashboardShell>
