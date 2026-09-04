@@ -15,7 +15,7 @@ import FollowerChart from "@/components/follower-chart";
 import type { OverviewResponse } from "@/app/api/instagram/overview/route";
 
 function formatNumber(n: number | null): string {
-  if (n === null) return "—";
+  if (n === null) return "-";
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return n.toLocaleString();
@@ -111,7 +111,7 @@ export default function OverviewPage() {
         <div className="min-w-0">
           <h1 className="text-lg font-semibold text-foreground">Overview</h1>
           <p className="text-sm text-muted mt-1">
-            {data.requestedCount === "all" ? "All-time" : "Recent"} —{" "}
+            {data.requestedCount === "all" ? "All-time" : "Recent"},{" "}
             {totals.posts} post{totals.posts === 1 ? "" : "s"} from @
             {data.account.username}
             {data.truncated ? ` (capped at ${totals.posts})` : ""}
@@ -161,7 +161,7 @@ export default function OverviewPage() {
             Views, reach, saved and shares need the insights permission.
           </p>
           <p className="text-sm text-muted mt-1">
-            Reconnect your account to grant it — likes and comments are shown in
+            Reconnect your account to grant it. Likes and comments are shown in
             the meantime.
           </p>
           <a
@@ -183,7 +183,7 @@ export default function OverviewPage() {
         <StatCard label="Shares" value={formatNumber(totals.shares)} />
       </div>
 
-      {/* Follower trend — account-level, independent of the post range */}
+      {/* Follower trend, account-level, independent of the post range */}
       <FollowerChart data={followerHistory} followers={followers} />
 
       {/* Per-post table */}

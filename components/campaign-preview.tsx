@@ -461,7 +461,7 @@ function DmScreen({
       </div>
 
       <div className="flex items-center gap-2 px-3 py-3">
-        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-accent text-white">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-accent text-on-accent">
           {Ico.camera("h-4 w-4")}
         </span>
         <div className="flex-1 rounded-full bg-zinc-800 px-3 py-2 text-xs text-zinc-500">Message…</div>

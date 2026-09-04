@@ -199,10 +199,17 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
   } = job.data;
   const requeueAttempt = job.data.requeueAttempt ?? 0;
 
+  // A Live broadcast's media id matches no campaign's postId, and a feed
+  // campaign set to "any post" should not start answering a livestream. Live
+  // comments therefore select on their own opt-in rather than on the post.
+  const postFilter =
+    job.data.source === "LIVE"
+      ? { liveCommentEnabled: true }
+      : { OR: [{ postId: mediaId }, { matchAnyPost: true }] };
+
   const automations = await prisma.automation.findMany({
     where: {
-      // Match campaigns bound to this specific post, plus any-post campaigns.
-      OR: [{ postId: mediaId }, { matchAnyPost: true }],
+      ...postFilter,
       isActive: true,
       instagramAccount: {
         instagramId: instagramAccountId,

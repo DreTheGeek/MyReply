@@ -29,11 +29,13 @@ export interface FollowerChartPoint {
   delta: number | null;
 }
 
-// Colors read against the light chart surface (#ffffff): the accent line clears
-// 3:1 contrast and grid/axis text match the muted/border tokens. See globals.css.
-const SERIES_COLOR = "#f97316";
-const GRID_COLOR = "#e4e4e7";
-const AXIS_TEXT = "#71717a";
+// Recharts cannot read Tailwind classes, but SVG paint attributes do accept CSS
+// custom properties, so the chart follows the theme tokens rather than pinning
+// hex values that only work on one background. See globals.css.
+const SERIES_COLOR = "var(--accent)";
+const GRID_COLOR = "var(--border)";
+const AXIS_TEXT = "var(--muted)";
+const SURFACE = "var(--surface)";
 
 function formatCompact(n: number): string {
   if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -134,7 +136,7 @@ export default function FollowerChart({
             {data.length === 0
               ? "No snapshots recorded yet."
               : "One day recorded so far."}{" "}
-            A point is added daily — the chart appears once there are at least
+            A point is added daily. The chart appears once there are at least
             two.
           </p>
         </div>
@@ -158,7 +160,7 @@ export default function FollowerChart({
                     {p.followers.toLocaleString()}
                   </td>
                   <td className="py-2 pl-3 text-right text-muted">
-                    {p.delta === null ? "—" : formatSigned(p.delta)}
+                    {p.delta === null ? "-" : formatSigned(p.delta)}
                   </td>
                 </tr>
               ))}
@@ -205,7 +207,7 @@ export default function FollowerChart({
                 stroke={SERIES_COLOR}
                 strokeWidth={2}
                 dot={false}
-                activeDot={{ r: 4, fill: SERIES_COLOR, stroke: "#ffffff", strokeWidth: 2 }}
+                activeDot={{ r: 4, fill: SERIES_COLOR, stroke: SURFACE, strokeWidth: 2 }}
                 isAnimationActive={false}
               />
             </LineChart>

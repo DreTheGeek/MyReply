@@ -131,7 +131,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-6 gap-4 sm:gap-6">
         {/* 7-Day Chart */}
         <div className="lg:col-span-3 panel rounded p-4 sm:p-6">
-          <h2 className="text-sm font-semibold text-foreground mb-6">DMs — Last 7 Days</h2>
+          <h2 className="text-sm font-semibold text-foreground mb-6">DMs, last 7 days</h2>
           <div className="flex items-end gap-1.5 h-40 sm:gap-2">
             {stats?.dailyDMs.map((day) => (
               <div key={day.date} className="min-w-0 flex-1 flex flex-col items-center gap-2">

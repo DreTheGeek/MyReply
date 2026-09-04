@@ -27,6 +27,13 @@ const createAutomationSchema = z
     keywords: z.array(z.string().min(1).max(50)).max(10).optional().default([]),
     matchAnyWord: z.boolean().optional().default(false),
     dmTriggerEnabled: z.boolean().optional().default(false),
+    storyReplyEnabled: z.boolean().optional().default(false),
+    storyMentionEnabled: z.boolean().optional().default(false),
+    liveCommentEnabled: z.boolean().optional().default(false),
+    defaultReplyEnabled: z.boolean().optional().default(false),
+    // Empty string means "no ref"; it is stored as null so an unused ref never
+    // collides with another campaign's.
+    referralRef: z.string().max(100).optional().nullable(),
     dmMessage: z.string().min(1).max(1000),
     openingDmEnabled: z.boolean().optional().default(false),
     openingDmMessage: z.string().max(1000).optional().nullable(),
@@ -61,10 +68,24 @@ const createAutomationSchema = z
     isActive: z.boolean().optional().default(true),
     wholeWordMatch: z.boolean().optional().default(true),
   })
-  // A campaign must target a specific post, any post, or the next reel.
+  // A campaign must target a specific post, any post, or the next reel, unless
+  // it fires from somewhere a post never applies: a DM, a story, a live, the
+  // default-reply fallback, or a referral ref.
   .refine(
-    (d) => d.matchAnyPost || d.pendingNextReel || Boolean(d.postId),
-    { message: "Choose which post(s) trigger the campaign", path: ["postId"] }
+    (d) =>
+      d.matchAnyPost ||
+      d.pendingNextReel ||
+      Boolean(d.postId) ||
+      d.dmTriggerEnabled ||
+      d.storyReplyEnabled ||
+      d.storyMentionEnabled ||
+      d.liveCommentEnabled ||
+      d.defaultReplyEnabled ||
+      Boolean(d.referralRef?.trim()),
+    {
+      message: "Choose which post(s) trigger the campaign, or turn on another trigger",
+      path: ["postId"],
+    }
   )
   // And it must match either specific words or any word.
   .refine((d) => d.matchAnyWord || d.keywords.length >= 1, {
@@ -90,6 +111,11 @@ const updateAutomationSchema = z.object({
   keywords: z.array(z.string().min(1).max(50)).max(10).optional(),
   matchAnyWord: z.boolean().optional(),
   dmTriggerEnabled: z.boolean().optional(),
+  storyReplyEnabled: z.boolean().optional(),
+  storyMentionEnabled: z.boolean().optional(),
+  liveCommentEnabled: z.boolean().optional(),
+  defaultReplyEnabled: z.boolean().optional(),
+  referralRef: z.string().max(100).optional().nullable(),
   dmMessage: z.string().min(1).max(1000).optional(),
   openingDmEnabled: z.boolean().optional(),
   openingDmMessage: z.string().max(1000).optional().nullable(),
@@ -395,6 +421,11 @@ export async function POST(request: NextRequest) {
       keywords: matchAnyWord ? [] : parsed.data.keywords,
       matchAnyWord,
       dmTriggerEnabled: parsed.data.dmTriggerEnabled,
+      storyReplyEnabled: parsed.data.storyReplyEnabled,
+      storyMentionEnabled: parsed.data.storyMentionEnabled,
+      liveCommentEnabled: parsed.data.liveCommentEnabled,
+      defaultReplyEnabled: parsed.data.defaultReplyEnabled,
+      referralRef: parsed.data.referralRef?.trim() || null,
       dmMessage: parsed.data.dmMessage,
       openingDmEnabled,
       openingDmMessage: openingDmEnabled
@@ -517,6 +548,10 @@ export async function PATCH(request: NextRequest) {
   if (automationData.followUpEnabled === false) {
     automationData.followUpMessage = null;
     automationData.followUpDelayMinutes = 0;
+  }
+  // A blank ref means "no ref entry", never a campaign keyed to an empty ref.
+  if (automationData.referralRef !== undefined) {
+    automationData.referralRef = automationData.referralRef?.trim() || null;
   }
   // Any-post / next-reel campaigns carry no specific post.
   if (automationData.matchAnyPost === true || automationData.pendingNextReel === true) {

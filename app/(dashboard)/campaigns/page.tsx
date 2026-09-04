@@ -328,7 +328,7 @@ export default function CampaignsPage() {
           </Link>
           <Link
             href="/campaigns/new"
-            className="flex-1 rounded bg-accent px-4 py-2 text-center text-sm font-medium text-white hover:bg-accent-hover sm:flex-none"
+            className="flex-1 rounded bg-accent px-4 py-2 text-center text-sm font-medium text-on-accent hover:bg-accent-hover sm:flex-none"
           >
             New Campaign
           </Link>
@@ -372,7 +372,7 @@ export default function CampaignsPage() {
           </p>
           <Link
             href="/campaigns/new"
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded bg-accent text-sm font-semibold text-white hover:bg-accent-hover transition-colors"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded bg-accent text-sm font-semibold text-on-accent hover:bg-accent-hover transition-colors"
           >
             Create Campaign
           </Link>

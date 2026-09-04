@@ -20,7 +20,12 @@ export function getRedisConnection(): Redis {
 
 // ─── DM Queue ───────────────────────────────────────────────────────────────────
 
-export type CommentSource = "WEBHOOK" | "POLLING";
+/**
+ * Where a comment job came from. LIVE is not just provenance: a Live
+ * broadcast's media id is not any campaign's postId, so live comments select
+ * campaigns by their own opt-in rather than by post.
+ */
+export type CommentSource = "WEBHOOK" | "POLLING" | "LIVE";
 
 export interface ProcessCommentJob {
   instagramAccountId: string;

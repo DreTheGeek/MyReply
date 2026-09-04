@@ -37,6 +37,11 @@ interface LoadedCampaign {
   keywords: string[];
   matchAnyWord: boolean;
   dmTriggerEnabled: boolean;
+  storyReplyEnabled: boolean;
+  storyMentionEnabled: boolean;
+  liveCommentEnabled: boolean;
+  defaultReplyEnabled: boolean;
+  referralRef: string | null;
   dmMessage: string;
   openingDmEnabled: boolean;
   openingDmMessage: string | null;
@@ -158,6 +163,11 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   const [matchMode, setMatchMode] = useState<MatchMode>("specific");
   const [keywordText, setKeywordText] = useState("");
   const [dmTriggerEnabled, setDmTriggerEnabled] = useState(false);
+  const [storyReplyEnabled, setStoryReplyEnabled] = useState(false);
+  const [storyMentionEnabled, setStoryMentionEnabled] = useState(false);
+  const [liveCommentEnabled, setLiveCommentEnabled] = useState(false);
+  const [defaultReplyEnabled, setDefaultReplyEnabled] = useState(false);
+  const [referralRef, setReferralRef] = useState("");
 
   const [publicReplyEnabled, setPublicReplyEnabled] = useState(false);
   const [publicReplyMessages, setPublicReplyMessages] = useState<string[]>([""]);
@@ -259,6 +269,11 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
         setMatchMode(c.matchAnyWord ? "any" : "specific");
         setKeywordText(c.keywords.join(", "));
         setDmTriggerEnabled(c.dmTriggerEnabled ?? false);
+        setStoryReplyEnabled(c.storyReplyEnabled ?? false);
+        setStoryMentionEnabled(c.storyMentionEnabled ?? false);
+        setLiveCommentEnabled(c.liveCommentEnabled ?? false);
+        setDefaultReplyEnabled(c.defaultReplyEnabled ?? false);
+        setReferralRef(c.referralRef ?? "");
         setPublicReplyEnabled(c.publicReplyEnabled);
         setPublicReplyMessages(
           c.publicReplyMessages?.length
@@ -387,8 +402,19 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
     setError(null);
 
     if (!selectedAccountId) return setError("Connect an Instagram account first.");
-    if (triggerScope === "specific" && !postId)
-      return setError("Pick a post or reel to trigger the campaign.");
+    // A post is only required when nothing else can fire the campaign: DMs,
+    // stories, lives, the default reply and refs all reach us without one.
+    const hasNonPostTrigger =
+      dmTriggerEnabled ||
+      storyReplyEnabled ||
+      storyMentionEnabled ||
+      liveCommentEnabled ||
+      defaultReplyEnabled ||
+      Boolean(referralRef.trim());
+    if (triggerScope === "specific" && !postId && !hasNonPostTrigger)
+      return setError(
+        "Pick a post or reel, or turn on one of the other triggers."
+      );
     if (matchMode === "specific" && keywords.length === 0)
       return setError("Add at least one keyword, or switch to any word.");
     if (!dmMessage.trim()) return setError("Add the DM with the link.");
@@ -407,6 +433,11 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
       matchAnyWord: matchMode === "any",
       keywords: matchMode === "any" ? [] : keywords,
       dmTriggerEnabled,
+      storyReplyEnabled,
+      storyMentionEnabled,
+      liveCommentEnabled,
+      defaultReplyEnabled,
+      referralRef: referralRef.trim() || null,
       dmMessage,
       openingDmEnabled,
       openingDmMessage: openingDmEnabled ? openingDmMessage : null,
@@ -559,7 +590,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
           </span>{" "}
           <span className="text-muted">
             Fields are prefilled from your CSV. Pick the reel, edit anything, and
-            save to load the next one — or Skip if you don&rsquo;t want this one.
+            save to load the next one, or Skip if you don&rsquo;t want this one.
           </span>
         </div>
       )}
@@ -619,7 +650,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
             type="button"
             onClick={() => handleSubmit(mode === "new" ? true : isActive)}
             disabled={saving}
-            className="rounded-lg bg-accent px-5 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+            className="rounded-lg bg-accent px-5 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover disabled:opacity-50"
           >
             {saving ? "Saving…" : mode === "new" ? "Go Live" : "Save changes"}
           </button>
@@ -733,7 +764,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
           {dmTriggerEnabled && (
             <p className="text-xs text-muted">
               {matchMode === "any"
-                ? "Every DM to this account gets the reply below — use with care."
+                ? "Every DM to this account gets the reply below. Use with care."
                 : "A DM containing any of these words gets the same reply, no comment needed."}
             </p>
           )}
@@ -794,6 +825,78 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
               </p>
             </div>
           )}
+          {/* Places this campaign can fire other than the comment section.
+              They all reuse the words above, except the story mention, which
+              carries no text to match on. */}
+          <p className="pt-1 text-xs font-semibold text-muted">
+            Other ways to trigger this campaign
+          </p>
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
+            <span className="text-sm text-foreground">
+              when someone replies to your story with{" "}
+              {matchMode === "any" ? "anything" : "these words"}
+            </span>
+            <Toggle
+              on={storyReplyEnabled}
+              onToggle={() => setStoryReplyEnabled(!storyReplyEnabled)}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
+            <span className="text-sm text-foreground">
+              when someone mentions you in their story
+            </span>
+            <Toggle
+              on={storyMentionEnabled}
+              onToggle={() => setStoryMentionEnabled(!storyMentionEnabled)}
+            />
+          </div>
+          {storyMentionEnabled && (
+            <p className="text-xs text-muted">
+              A story mention has no text, so your words above are ignored here.
+              Every mention gets the reply.
+            </p>
+          )}
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
+            <span className="text-sm text-foreground">
+              when someone comments{" "}
+              {matchMode === "any" ? "anything" : "these words"} on your live
+            </span>
+            <Toggle
+              on={liveCommentEnabled}
+              onToggle={() => setLiveCommentEnabled(!liveCommentEnabled)}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
+            <span className="text-sm text-foreground">
+              when a DM matches none of your other campaigns
+            </span>
+            <Toggle
+              on={defaultReplyEnabled}
+              onToggle={() => setDefaultReplyEnabled(!defaultReplyEnabled)}
+            />
+          </div>
+          {defaultReplyEnabled && (
+            <p className="text-xs text-muted">
+              This is your catch-all answer, sent only after every other
+              campaign passes. Keep it on one campaign per account.
+            </p>
+          )}
+          <div className="rounded-lg border border-border p-3 space-y-2">
+            <span className="text-sm text-foreground">
+              when someone starts a chat from a link or QR code
+            </span>
+            <input
+              value={referralRef}
+              onChange={(e) => setReferralRef(e.target.value)}
+              placeholder="e.g. spring-flyer"
+              maxLength={100}
+              className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+            />
+            <p className="text-xs text-muted">
+              Put this exact ref on your link, QR code or website button. Leave
+              it empty if you are not using one.
+            </p>
+          </div>
         </Section>
 
         <Section title="They will get">
