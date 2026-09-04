@@ -63,24 +63,59 @@ interface WebhookEntry {
   messaging?: Array<{
     sender?: { id?: string };
     recipient?: { id?: string };
-    postback?: { mid?: string; title?: string; payload?: string };
+    postback?: { mid?: string; title?: string; payload?: string; referral?: { ref?: string } };
     read?: { watermark?: number; seq?: number };
+    // Present when the user arrived through an ig.me link, QR code or website
+    // button carrying a ref parameter, rather than by messaging directly.
+    referral?: { ref?: string; source?: string; type?: string };
     message?: {
       mid?: string;
       text?: string;
       is_echo?: boolean;
       is_deleted?: boolean;
       is_unsupported?: boolean;
-      attachments?: Array<{ type?: string }>;
+      // Instagram delivers a story reply as an ordinary message that also
+      // carries the story it replies to, and a story mention as an attachment
+      // with no text at all.
+      reply_to?: { story?: { id?: string; url?: string }; mid?: string };
+      attachments?: Array<{ type?: string; payload?: { url?: string } }>;
     };
   }>;
 }
+
+/**
+ * How an inbound message reached us. Instagram sends all three down the same
+ * messaging channel, so the distinction is ours to draw: without it a story
+ * reply is indistinguishable from someone typing into your DMs, and a campaign
+ * cannot target one without catching the other.
+ */
+export type MessageKind = "dm" | "story_reply" | "story_mention";
 
 export interface WebhookMessageEvent {
   instagramAccountId: string;
   messageId: string;
   messageText: string;
   senderId: string;
+  kind: MessageKind;
+  /** The story replied to or mentioned in, when the kind is story-related. */
+  storyId?: string;
+  storyUrl?: string;
+}
+
+export interface WebhookLiveCommentEvent {
+  instagramAccountId: string;
+  commentId: string;
+  commentText: string;
+  commenterId: string;
+  commenterName?: string;
+  mediaId: string;
+}
+
+export interface WebhookReferralEvent {
+  instagramAccountId: string;
+  userId: string;
+  ref: string;
+  source?: string;
 }
 
 export interface WebhookPostbackEvent {
@@ -205,15 +240,106 @@ export function parseMessageEvents(
       const senderId = messaging.sender?.id;
       const accountId = entry.id ?? messaging.recipient?.id;
 
-      if (!text || !messageId || !senderId || !accountId) continue;
+      if (!messageId || !senderId || !accountId) continue;
       // Ignore anything the connected account sent to itself.
       if (senderId === accountId) continue;
+
+      const mentionAttachment = message.attachments?.find(
+        (attachment) => attachment.type === "story_mention"
+      );
+      const repliedStory = message.reply_to?.story;
+
+      let kind: MessageKind = "dm";
+      if (mentionAttachment) {
+        kind = "story_mention";
+      } else if (repliedStory) {
+        kind = "story_reply";
+      }
+
+      // A story mention carries no text at all, so the usual "text or drop"
+      // rule would discard it. Every other kind still needs words to match on.
+      if (!text && kind !== "story_mention") continue;
 
       events.push({
         instagramAccountId: accountId,
         messageId,
-        messageText: text,
+        messageText: text ?? "",
         senderId,
+        kind,
+        storyId: repliedStory?.id,
+        storyUrl: repliedStory?.url ?? mentionAttachment?.payload?.url,
+      });
+    }
+  }
+
+  return events;
+}
+
+/**
+ * Parse comments left on an Instagram Live broadcast. Structurally identical to
+ * a feed comment but delivered on its own field, so it needs its own
+ * subscription and its own parser.
+ */
+export function parseLiveCommentEvents(
+  payload: WebhookPayload
+): WebhookLiveCommentEvent[] {
+  const events: WebhookLiveCommentEvent[] = [];
+
+  if (payload.object !== "instagram") return events;
+
+  for (const entry of payload.entry ?? []) {
+    for (const change of entry.changes ?? []) {
+      if (change.field !== "live_comments") continue;
+
+      const value = change.value;
+      const commentId = value?.id ?? value?.comment_id;
+      const mediaId = value?.media?.id ?? value?.media_id;
+      const commenterId = value?.from?.id;
+
+      if (!entry.id || !commentId || !mediaId || !commenterId) continue;
+      // The host's own comments on their own broadcast are not leads.
+      if (commenterId === entry.id) continue;
+
+      events.push({
+        instagramAccountId: entry.id,
+        commentId,
+        commentText: value.text ?? "",
+        commenterId,
+        commenterName: value.from?.username,
+        mediaId,
+      });
+    }
+  }
+
+  return events;
+}
+
+/**
+ * Parse arrivals that carry a referral code: an ig.me link, a QR code, or a
+ * website button. The code arrives either on its own referral object for a new
+ * conversation, or nested in a postback when the user taps to begin.
+ */
+export function parseReferralEvents(
+  payload: WebhookPayload
+): WebhookReferralEvent[] {
+  const events: WebhookReferralEvent[] = [];
+
+  if (payload.object !== "instagram") return events;
+
+  for (const entry of payload.entry ?? []) {
+    for (const messaging of entry.messaging ?? []) {
+      const ref = messaging.referral?.ref ?? messaging.postback?.referral?.ref;
+      const userId = messaging.sender?.id;
+      const accountId = entry.id ?? messaging.recipient?.id;
+
+      if (!ref || !userId || !accountId) continue;
+      if (userId === accountId) continue;
+
+      events.push({
+        instagramAccountId: accountId,
+        userId,
+        ref,
+        source: messaging.referral?.source,
       });
     }
   }
