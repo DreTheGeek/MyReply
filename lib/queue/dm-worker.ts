@@ -937,10 +937,25 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
  */
 async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
   const { instagramAccountId, messageId, messageText, senderId } = job.data;
+  // Jobs enqueued before story triggers existed carry no kind.
+  const kind = job.data.kind ?? "dm";
+
+  // Each inbound surface has its own opt-in, so enabling story replies does
+  // not silently start answering every DM, and vice versa. "default" is not a
+  // surface: it is the fallback pass, entered only after every keyword
+  // campaign has declined an ordinary DM.
+  const triggerFilter =
+    kind === "story_reply"
+      ? { storyReplyEnabled: true }
+      : kind === "story_mention"
+        ? { storyMentionEnabled: true }
+        : kind === "default"
+          ? { defaultReplyEnabled: true }
+          : { dmTriggerEnabled: true };
 
   const automations = await prisma.automation.findMany({
     where: {
-      dmTriggerEnabled: true,
+      ...triggerFilter,
       isActive: true,
       instagramAccount: { instagramId: instagramAccountId },
     },
@@ -956,17 +971,23 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
   });
 
   const dedupeId = `dm:${messageId}`;
+  let anyMatched = false;
 
   for (const automation of automations) {
-    const matchResult = automation.matchAnyWord
-      ? { matched: true, matchedKeyword: null }
-      : matchKeywords(
-          messageText,
-          automation.keywords,
-          automation.wholeWordMatch
-        );
+    // A story mention carries no text, so there is nothing to match on: being
+    // mentioned is itself the trigger. The default-reply pass has already
+    // established that nothing matched, so it does not re-check either.
+    const matchResult =
+      kind === "story_mention" || kind === "default" || automation.matchAnyWord
+        ? { matched: true, matchedKeyword: null }
+        : matchKeywords(
+            messageText,
+            automation.keywords,
+            automation.wholeWordMatch
+          );
 
     if (!matchResult.matched) continue;
+    anyMatched = true;
 
     const existingLog = await prisma.dmLog.findUnique({
       where: {
@@ -1176,6 +1197,28 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
       throw error;
     }
   }
+
+  // Nothing wanted this message. Fall back to the default-reply campaign, if
+  // the account has one. Only for ordinary DMs: an unanswered story mention
+  // should stay silent rather than trigger a generic reply.
+  if (!anyMatched && kind === "dm") {
+    await runDefaultReply(job);
+  }
+}
+
+/**
+ * Answer an inbound DM that matched no keyword campaign.
+ *
+ * Re-enters processMessage with kind "default" rather than duplicating the
+ * send, rate-limit, usage and logging logic. That kind selects only campaigns
+ * with defaultReplyEnabled and never falls back again, so the recursion is one
+ * level deep by construction.
+ */
+async function runDefaultReply(job: Job<ProcessMessageJob>): Promise<void> {
+  await processMessage({
+    ...job,
+    data: { ...job.data, kind: "default" },
+  } as Job<ProcessMessageJob>);
 }
 
 async function processJob(job: Job<DmQueueJob>): Promise<void> {

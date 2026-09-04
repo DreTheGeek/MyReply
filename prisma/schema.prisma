@@ -217,6 +217,21 @@ model Automation {
   // keywords above. Independent of the post trigger — a DM has no media, so
   // postId / matchAnyPost do not apply to it.
   dmTriggerEnabled Boolean @default(false)
+  // Fire when someone replies to one of your stories with matching text.
+  // Instagram delivers this as a message, so keywords still apply.
+  storyReplyEnabled Boolean @default(false)
+  // Fire when someone mentions you in their story. There is no text to match
+  // on, so the mention itself is the trigger and keywords are ignored.
+  storyMentionEnabled Boolean @default(false)
+  // Fire on matching comments during an Instagram Live broadcast.
+  liveCommentEnabled Boolean @default(false)
+  // Answer inbound DMs that matched no other campaign. At most one per
+  // account should carry this, and it is only consulted after every keyword
+  // campaign has declined the message.
+  defaultReplyEnabled Boolean @default(false)
+  // Fire when someone opens a conversation through a link, QR code or website
+  // button carrying this exact ref. Null means the campaign has no ref entry.
+  referralRef String?
   dmMessage      String
   openingDmEnabled     Boolean @default(false)
   openingDmMessage     String?
