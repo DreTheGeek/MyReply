@@ -13,7 +13,7 @@ function createPrismaClient() {
 
   // Postgres schema these tables live in. Unset means the Postgres default of
   // public, which is the upstream behavior. Set it when the database is shared
-  // with other applications, so OpenReply stays in its own schema.
+  // with other applications, so MyReply stays in its own schema.
   const schema = process.env.DATABASE_SCHEMA;
 
   return new PrismaClient({
