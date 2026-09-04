@@ -5,6 +5,7 @@ import { generateApiKey } from "@/lib/api-keys";
 import {
   canManageWorkspace,
   getCurrentWorkspaceContext,
+  hasWorkspaceRole,
 } from "@/lib/workspace-access";
 
 export const runtime = "nodejs";
@@ -19,19 +20,19 @@ const revokeSchema = z.object({
   id: z.string().min(1),
 });
 
-/** List this workspace's keys. Never returns a key, only its metadata. */
-export async function GET() {
+/**
+ * List this workspace's keys. Never returns a key or its hash, only metadata.
+ *
+ * Open to any member, matching /api/workspace/members: a member can see that
+ * keys exist and when they were last used, but the write verbs below stay
+ * gated on canManageWorkspace.
+ */
+export async function GET(): Promise<NextResponse> {
   const context = await getCurrentWorkspaceContext();
   if (!context) {
     return NextResponse.json(
       { success: false, error: "Unauthorized" },
       { status: 401 }
-    );
-  }
-  if (!canManageWorkspace(context.role)) {
-    return NextResponse.json(
-      { success: false, error: "Forbidden" },
-      { status: 403 }
     );
   }
 
@@ -50,10 +51,13 @@ export async function GET() {
     },
   });
 
-  return NextResponse.json({ success: true, data: { keys } });
+  return NextResponse.json({
+    success: true,
+    data: { keys, currentUserRole: context.role },
+  });
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request: NextRequest): Promise<NextResponse> {
   const context = await getCurrentWorkspaceContext();
   if (!context) {
     return NextResponse.json(
@@ -68,12 +72,29 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const body = await request.json().catch(() => ({}));
+  const body: unknown = await request.json().catch(() => ({}));
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { success: false, error: "A name is required" },
+      {
+        success: false,
+        error: "A name is required, and any expiry must be a number of days",
+      },
       { status: 400 }
+    );
+  }
+
+  // A key can never act with more access than the person minting it. The gate
+  // above already requires ADMIN, so today this only bites if that gate is ever
+  // loosened. That is precisely when a silent escalation would do the damage,
+  // so the ceiling is checked here rather than left implied.
+  if (!hasWorkspaceRole(context.role, parsed.data.role)) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "A key cannot be given more access than your own role",
+      },
+      { status: 403 }
     );
   }
 
@@ -93,7 +114,16 @@ export async function POST(request: NextRequest) {
       // Empty when the caller was itself an API key, which has no user behind it.
       createdByUserId: context.userId || null,
     },
-    select: { id: true, name: true, prefix: true, role: true, expiresAt: true },
+    select: {
+      id: true,
+      name: true,
+      prefix: true,
+      role: true,
+      lastUsedAt: true,
+      expiresAt: true,
+      revokedAt: true,
+      createdAt: true,
+    },
   });
 
   // The only time the plaintext key exists outside the caller's hands. It is
@@ -104,7 +134,7 @@ export async function POST(request: NextRequest) {
   });
 }
 
-export async function DELETE(request: NextRequest) {
+export async function DELETE(request: NextRequest): Promise<NextResponse> {
   const context = await getCurrentWorkspaceContext();
   if (!context) {
     return NextResponse.json(
@@ -119,7 +149,7 @@ export async function DELETE(request: NextRequest) {
     );
   }
 
-  const body = await request.json().catch(() => ({}));
+  const body: unknown = await request.json().catch(() => ({}));
   const parsed = revokeSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
@@ -129,6 +159,8 @@ export async function DELETE(request: NextRequest) {
   }
 
   // Scoped by workspaceId so one tenant cannot revoke another tenant's key.
+  // Revoking stamps revokedAt rather than deleting the row, so the audit trail
+  // of what existed and when it was used survives.
   const result = await prisma.apiKey.updateMany({
     where: {
       id: parsed.data.id,

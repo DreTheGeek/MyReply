@@ -9,11 +9,29 @@ data, and nothing in either surface accepts a workspace id as an argument.
 
 ## Getting a key
 
-Settings, API keys, Create key. The key is shown once and never again, because
-only its SHA-256 hash is stored. If you lose it, revoke it and make another.
+Settings, API keys, Create key. Name it after whatever will hold it, so you
+know what breaks when you revoke it, and optionally give it an expiry and a
+role. The key is shown once, in a panel you dismiss, and never again: only its
+SHA-256 hash is stored, so nobody can show it to you a second time. If you lose
+it, revoke it and make another.
 
-Keys look like `mr_live_...`, can be given an expiry, and can be revoked at any
-time. Revocation takes effect on the next request.
+Only an owner or an admin can create or revoke a key. A member sees the same
+list read-only.
+
+A key carries a role from the same ladder as a human member, and can never be
+given more access than the person who created it. Keys stop at admin; there is
+no owner key. Over REST, an `ADMIN` key can create, update, delete and import
+campaigns, while a `MEMBER` key is refused those writes with a 403 and can only
+read.
+
+The MCP surface does not apply that role today: any valid key can call the
+write tools there. So treat the role as a REST-side control rather than a
+sandbox, and give an MCP client a key you are happy to let write.
+
+Keys look like `mr_live_...` and can be revoked at any time. Revoking stamps the
+key rather than deleting it, so the record of what existed and when it was last
+used survives. Revocation takes effect on the next request, as does an expiry
+passing.
 
 ```
 Authorization: Bearer mr_live_xxxxxxxxxxxxxxxxxxxx

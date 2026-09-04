@@ -3,6 +3,8 @@
 import { Suspense, useEffect, useState } from "react";
 import type { AccountOption } from "@/components/account-select";
 import { InstagramConnectNotice } from "@/components/instagram-connect-notice";
+import AiKeySection from "@/components/settings/ai-key-section";
+import ApiKeysSection from "@/components/settings/api-keys-section";
 
 interface SettingsData {
   workspace: {
@@ -637,6 +639,14 @@ export default function SettingsPage() {
             )}
           </form>
         )}
+      </section>
+
+      <section id="ai-key" className="panel rounded p-4 sm:p-6">
+        <AiKeySection />
+      </section>
+
+      <section id="api-keys" className="panel rounded p-4 sm:p-6">
+        <ApiKeysSection currentUserRole={membersData?.currentUserRole ?? null} />
       </section>
 
       <section className="panel rounded p-4 sm:p-6">
