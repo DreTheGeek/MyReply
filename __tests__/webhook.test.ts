@@ -314,6 +314,11 @@ describe("parseMessageEvents", () => {
         messageId: "mid_abc",
         messageText: "send me the LINK please",
         senderId: "user_999",
+        // A plain DM is now labelled as such, so a campaign can target story
+        // replies and story mentions separately from ordinary messages.
+        kind: "dm",
+        storyId: undefined,
+        storyUrl: undefined,
       },
     ]);
   });

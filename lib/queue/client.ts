@@ -61,6 +61,10 @@ export interface ProcessMessageJob {
   messageId: string;
   messageText: string;
   senderId: string;
+  // Which inbound surface this arrived on. Absent on jobs enqueued before
+  // story triggers existed, which are treated as ordinary DMs. "default" is
+  // never enqueued: the worker sets it on its own fallback pass.
+  kind?: "dm" | "story_reply" | "story_mention" | "default";
 }
 
 export type DmQueueJob =

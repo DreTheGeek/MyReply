@@ -18,11 +18,44 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
+  // Which workspace this user is currently acting in. Null means fall back to
+  // their oldest membership. This is a preference, never a grant: every read
+  // re-checks WorkspaceMember, so a stale or revoked id gives no access.
+  activeWorkspaceId String?
+
   accounts          Account[]
   sessions          Session[]
   ownedWorkspaces   Workspace[]       @relation("WorkspaceOwner")
   workspaceMembers  WorkspaceMember[]
   sentInvitations   WorkspaceInvitation[] @relation("WorkspaceInvitationsSent")
+  activeWorkspace   Workspace?        @relation("UserActiveWorkspace", fields: [activeWorkspaceId], references: [id], onDelete: SetNull)
+  createdApiKeys    ApiKey[]          @relation("ApiKeyCreatedBy")
+}
+
+/// A machine credential scoped to one workspace, for the public API and for
+/// embedding MyReply inside another product. Only the SHA-256 hash is stored,
+/// so a leaked database row cannot be replayed as a key. `prefix` is the
+/// human-readable head of the key, kept solely so the UI can tell keys apart.
+model ApiKey {
+  id              String        @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name            String
+  prefix          String
+  hashedKey       String        @unique
+  /// The workspace role this key acts with. Reuses the same RBAC ladder as a
+  /// human member, so canManageWorkspace applies unchanged.
+  role            WorkspaceRole @default(ADMIN)
+  createdByUserId String?
+  createdBy       User?         @relation("ApiKeyCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  lastUsedAt      DateTime?
+  expiresAt       DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([workspaceId])
+  @@index([createdByUserId])
 }
 
 model Account {
@@ -84,6 +117,8 @@ model Workspace {
   linkClicks        LinkClick[]
   webhookEvents     WebhookEvent[]
   operationalEvents OperationalEvent[]
+  activeForUsers    User[]                @relation("UserActiveWorkspace")
+  apiKeys           ApiKey[]
 
   @@index([ownerId])
 }
@@ -182,6 +217,21 @@ model Automation {
   // keywords above. Independent of the post trigger — a DM has no media, so
   // postId / matchAnyPost do not apply to it.
   dmTriggerEnabled Boolean @default(false)
+  // Fire when someone replies to one of your stories with matching text.
+  // Instagram delivers this as a message, so keywords still apply.
+  storyReplyEnabled Boolean @default(false)
+  // Fire when someone mentions you in their story. There is no text to match
+  // on, so the mention itself is the trigger and keywords are ignored.
+  storyMentionEnabled Boolean @default(false)
+  // Fire on matching comments during an Instagram Live broadcast.
+  liveCommentEnabled Boolean @default(false)
+  // Answer inbound DMs that matched no other campaign. At most one per
+  // account should carry this, and it is only consulted after every keyword
+  // campaign has declined the message.
+  defaultReplyEnabled Boolean @default(false)
+  // Fire when someone opens a conversation through a link, QR code or website
+  // button carrying this exact ref. Null means the campaign has no ref entry.
+  referralRef String?
   dmMessage      String
   openingDmEnabled     Boolean @default(false)
   openingDmMessage     String?

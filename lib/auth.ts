@@ -1,7 +1,14 @@
 import NextAuth, { type NextAuthConfig } from "next-auth";
+import { headers } from "next/headers";
 import Resend from "next-auth/providers/resend";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/db/client";
+import {
+  type ApiKeyContext,
+  extractApiKey,
+  resolveApiKey,
+  touchApiKey,
+} from "@/lib/api-keys";
 import { ensureWorkspaceForUser, getPrimaryWorkspace } from "@/lib/workspace";
 
 type AdapterPrismaClient = Parameters<typeof PrismaAdapter>[0];
@@ -47,7 +54,37 @@ export async function getCurrentUserId(): Promise<string | null> {
   return session?.user?.id ?? null;
 }
 
+/**
+ * Resolve an API key from the ambient request headers, if one was sent.
+ *
+ * Reading headers() rather than taking a Request means every existing route
+ * gains machine auth without changing its signature. Returns null outside a
+ * request scope (the worker, cron scripts), where cookie auth is also absent.
+ */
+async function getApiKeyContext(): Promise<ApiKeyContext | null> {
+  try {
+    const headerList = await headers();
+    const plaintext = extractApiKey(headerList.get("authorization"));
+    if (!plaintext) return null;
+
+    const context = await resolveApiKey(plaintext);
+    if (context) touchApiKey(context.apiKeyId);
+    return context;
+  } catch {
+    return null;
+  }
+}
+
+export async function getRequestApiKeyContext(): Promise<ApiKeyContext | null> {
+  return getApiKeyContext();
+}
+
 export async function getCurrentWorkspaceId(): Promise<string | null> {
+  // A valid API key names its own workspace, so it short-circuits before the
+  // session lookup. Cookie auth stays the fallback for the dashboard.
+  const apiKeyContext = await getApiKeyContext();
+  if (apiKeyContext) return apiKeyContext.workspaceId;
+
   const userId = await getCurrentUserId();
   if (!userId) return null;
 

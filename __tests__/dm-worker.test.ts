@@ -208,10 +208,34 @@ function createMockPostbackJob(
   };
 }
 
+/**
+ * Make automation.findMany honour the trigger flag the worker filters on, the
+ * way Postgres would. Without it the mock answers every query with the same
+ * campaign, so the default-reply fallback appears to fire for messages that
+ * matched nothing, and a story-reply query returns DM campaigns.
+ */
+const TRIGGER_FLAGS = [
+  "storyReplyEnabled",
+  "storyMentionEnabled",
+  "defaultReplyEnabled",
+  "liveCommentEnabled",
+] as const;
+
+function returnAutomationRespectingTriggers(fixture: Record<string, unknown>) {
+  mockPrisma.automation.findMany.mockImplementation(
+    (args?: { where?: Record<string, unknown> }) => {
+      const where = args?.where ?? {};
+      const optIn = TRIGGER_FLAGS.find((flag) => where[flag] === true);
+      if (optIn && !fixture[optIn]) return Promise.resolve([]);
+      return Promise.resolve([fixture]);
+    }
+  );
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 
-  mockPrisma.automation.findMany.mockResolvedValue([mockAutomation]);
+  returnAutomationRespectingTriggers(mockAutomation);
   mockPrisma.automation.findFirst.mockResolvedValue(null);
   mockPrisma.dmLog.findUnique.mockResolvedValue(null);
   mockPrisma.dmLog.create.mockResolvedValue({});
@@ -923,7 +947,7 @@ describe("DM Worker — DM keyword trigger", () => {
   }
 
   beforeEach(() => {
-    mockPrisma.automation.findMany.mockResolvedValue([dmTriggerAutomation]);
+    returnAutomationRespectingTriggers(dmTriggerAutomation);
   });
 
   it("should reply to a DM whose text matches the campaign keywords", async () => {
@@ -956,6 +980,83 @@ describe("DM Worker — DM keyword trigger", () => {
 
     expect(mockSendDirectMessage).not.toHaveBeenCalled();
     expect(mockSendDirectMessageWithLinkButton).not.toHaveBeenCalled();
+  });
+
+  it("selects story-reply campaigns, not DM campaigns, for a story reply", async () => {
+    returnAutomationRespectingTriggers({
+      ...dmTriggerAutomation,
+      storyReplyEnabled: true,
+    });
+
+    const processor = getProcessor();
+    await processor(createMockMessageJob({ kind: "story_reply" }));
+
+    expect(mockPrisma.automation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ storyReplyEnabled: true }),
+      })
+    );
+    expect(mockSendDirectMessage).toHaveBeenCalled();
+  });
+
+  it("does not answer a story reply with a DM-trigger campaign", async () => {
+    // The fixture opts into DM triggers only, so a story reply finds nothing.
+    const processor = getProcessor();
+    await processor(createMockMessageJob({ kind: "story_reply" }));
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+  });
+
+  it("fires on a story mention even though it carries no text", async () => {
+    mockMatchKeywords.mockReturnValue({ matched: false, matchedKeyword: null });
+    returnAutomationRespectingTriggers({
+      ...dmTriggerAutomation,
+      storyMentionEnabled: true,
+    });
+
+    const processor = getProcessor();
+    await processor(
+      createMockMessageJob({ kind: "story_mention", messageText: "" })
+    );
+
+    // Being mentioned is the trigger, so the keyword matcher is bypassed.
+    expect(mockSendDirectMessage).toHaveBeenCalled();
+  });
+
+  it("falls back to the default-reply campaign when nothing matched", async () => {
+    mockMatchKeywords.mockReturnValue({ matched: false, matchedKeyword: null });
+    returnAutomationRespectingTriggers({
+      ...dmTriggerAutomation,
+      defaultReplyEnabled: true,
+    });
+
+    const processor = getProcessor();
+    await processor(createMockMessageJob({ messageText: "unrecognised" }));
+
+    expect(mockPrisma.automation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ defaultReplyEnabled: true }),
+      })
+    );
+    expect(mockSendDirectMessage).toHaveBeenCalled();
+  });
+
+  it("does not fall back for a story mention that matched nothing", async () => {
+    // A generic "did not understand" reply to a story mention would be noise.
+    mockMatchKeywords.mockReturnValue({ matched: false, matchedKeyword: null });
+    returnAutomationRespectingTriggers({
+      ...dmTriggerAutomation,
+      defaultReplyEnabled: true,
+    });
+
+    const processor = getProcessor();
+    await processor(createMockMessageJob({ kind: "story_mention" }));
+
+    expect(mockPrisma.automation.findMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ defaultReplyEnabled: true }),
+      })
+    );
   });
 
   it("should log the reply against the inbound message id for dedup", async () => {

@@ -3,9 +3,11 @@ import { prisma } from "@/lib/db/client";
 import { getDMQueue } from "@/lib/queue/client";
 import {
   parseCommentEvents,
+  parseLiveCommentEvents,
   parseMessageEvents,
   parsePostbackEvents,
   parseReadEvents,
+  parseReferralEvents,
   verifyWebhookSignature,
 } from "@/lib/meta/webhook";
 import { MESSAGE_JOB_NAME, POSTBACK_JOB_NAME } from "@/lib/queue/client";
@@ -114,6 +116,63 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Comments on a Live broadcast. Same shape as a feed comment once parsed,
+    // so they ride the same job and the same worker path.
+    const liveCommentEvents = parseLiveCommentEvents(
+      payload as Parameters<typeof parseLiveCommentEvents>[0]
+    );
+
+    for (const event of liveCommentEvents) {
+      await queue.add(
+        "process-comment",
+        {
+          instagramAccountId: event.instagramAccountId,
+          commentId: event.commentId,
+          commentText: event.commentText,
+          commenterId: event.commenterId,
+          commenterName: event.commenterName,
+          mediaId: event.mediaId,
+          source: "WEBHOOK",
+        },
+        {
+          jobId: `live_${event.instagramAccountId}_${event.commentId}`,
+        }
+      );
+    }
+
+    // Arrivals carrying a ref from a link, QR code or website button. The ref
+    // names the campaign, so this needs no keyword match.
+    const referralEvents = parseReferralEvents(
+      payload as Parameters<typeof parseReferralEvents>[0]
+    );
+
+    for (const event of referralEvents) {
+      const automation = await prisma.automation.findFirst({
+        where: {
+          referralRef: event.ref,
+          isActive: true,
+          instagramAccount: { instagramId: event.instagramAccountId },
+        },
+        select: { id: true },
+      });
+
+      // An unknown ref is not an error. It usually means a campaign was paused
+      // or renamed while its QR codes are still in the wild.
+      if (!automation) continue;
+
+      await queue.add(
+        POSTBACK_JOB_NAME,
+        {
+          instagramAccountId: event.instagramAccountId,
+          userId: event.userId,
+          payload: `reveal:${automation.id}`,
+        },
+        {
+          jobId: `referral_${event.instagramAccountId}_${event.userId}_${automation.id}`,
+        }
+      );
+    }
+
     // Button taps from opening DMs → deliver the reveal message.
     const postbackEvents = parsePostbackEvents(
       payload as Parameters<typeof parsePostbackEvents>[0]
@@ -156,6 +215,7 @@ export async function POST(request: NextRequest) {
           messageId: event.messageId,
           messageText: event.messageText,
           senderId: event.senderId,
+          kind: event.kind,
         },
         {
           // Message ids can contain characters BullMQ rejects in a job id (":"
