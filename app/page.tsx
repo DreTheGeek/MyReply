@@ -554,7 +554,7 @@ export default function Home() {
             Security
           </p>
           <h2 className="mt-3 max-w-2xl text-balance font-display text-3xl font-bold leading-tight sm:text-4xl">
-            Your clients' accounts, handled properly.
+            Your clients&apos; accounts, handled properly.
           </h2>
 
           <div className="mt-10 grid gap-4 sm:grid-cols-2">
@@ -563,7 +563,7 @@ export default function Home() {
                 No passwords, ever
               </h3>
               <p className="mt-2 text-sm leading-relaxed text-muted">
-                Accounts connect through Instagram's own authorisation screen.
+                Accounts connect through Instagram&apos;s own authorisation screen.
                 MyReply never sees a password and never drives a browser.
               </p>
             </div>
