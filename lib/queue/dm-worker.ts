@@ -24,6 +24,8 @@ import {
   sendPrivateReply,
   sendPrivateReplyWithButton,
   sendPrivateReplyWithLinkButton,
+  sendAttachment,
+  inferAttachmentType,
 } from "@/lib/meta/client";
 import { decryptToken } from "@/lib/meta/oauth";
 import { recordContactDm, upsertContact } from "@/lib/contacts";
@@ -113,9 +115,44 @@ function buildInlineLinkFallback(
 type RevealAutomation = {
   dmMessage: string;
   linkButtonLabel: string | null;
+  attachmentUrl?: string | null;
   trackedLinks: WorkerTrackedLink[];
   instagramAccount: { instagramId: string };
 };
+
+/**
+ * Send a campaign's attachment, if it has one, after the message itself.
+ *
+ * Instagram carries either text or a file in one send, never both, so this is
+ * always a second call and always lands under the message. Failures are
+ * swallowed: the DM the recipient asked for has already gone out, and losing
+ * the file is not a reason to fail the job and retry the whole sequence, which
+ * would send the message twice.
+ */
+async function sendAttachmentIfAny(
+  accessToken: string,
+  automation: { attachmentUrl?: string | null; instagramAccount: { instagramId: string } },
+  userId: string,
+  context: string
+): Promise<void> {
+  const url = automation.attachmentUrl?.trim();
+  if (!url) return;
+
+  try {
+    await sendAttachment(
+      accessToken,
+      automation.instagramAccount.instagramId,
+      userId,
+      url,
+      inferAttachmentType(url)
+    );
+  } catch (error) {
+    console.warn(
+      `[DM Worker] Attachment failed in ${context}, message already delivered:`,
+      formatError(error)
+    );
+  }
+}
 
 /**
  * Deliver a campaign's reveal message as a direct message. Shared by the
@@ -140,6 +177,7 @@ async function sendRevealDirectMessage(
         trackedLinks: automation.trackedLinks,
       })
     );
+    await sendAttachmentIfAny(accessToken, automation, userId, context);
     return;
   }
 
@@ -187,6 +225,10 @@ async function sendRevealDirectMessage(
       throw buttonError;
     }
   }
+
+  // Reached whether the button template worked or the inline fallback did, so
+  // the file follows the message either way.
+  await sendAttachmentIfAny(accessToken, automation, userId, context);
 }
 
 async function processComment(job: Job<ProcessCommentJob>): Promise<void> {

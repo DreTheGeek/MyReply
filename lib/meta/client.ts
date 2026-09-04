@@ -334,6 +334,65 @@ export async function sendPrivateReplyWithLinkButton(
  * Send a plain-text direct message to a user by their Instagram-scoped ID.
  * Used to deliver the reveal message after a button postback.
  */
+/**
+ * What Instagram will carry as an attachment. `file` covers PDFs and other
+ * documents; the rest are what their names suggest.
+ */
+export type AttachmentType = "image" | "video" | "audio" | "file";
+
+/**
+ * Send a file rather than text. Instagram fetches the URL itself, so it must
+ * be publicly reachable: a signed URL that expires, or anything behind auth,
+ * fails on Meta's side rather than ours.
+ *
+ * Sent as its own message because Instagram's send API carries either text or
+ * an attachment, never both, so a caption is a second call.
+ */
+export async function sendAttachment(
+  accessToken: string,
+  instagramAccountId: string,
+  userId: string,
+  attachmentUrl: string,
+  type: AttachmentType = "image"
+): Promise<{ recipient_id: string; message_id: string }> {
+  const response = await fetch(
+    `${instagramGraphBase()}/${instagramAccountId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        recipient: { id: userId },
+        message: {
+          attachment: {
+            type,
+            // Reusable so a campaign sending the same lead magnet a thousand
+            // times uploads it to Meta once instead of on every send.
+            payload: { url: attachmentUrl, is_reusable: true },
+          },
+        },
+      }),
+    }
+  );
+
+  return handleResponse(response);
+}
+
+/**
+ * Guess the attachment type from the URL's extension. Instagram rejects a
+ * mismatched type, and campaign authors paste links rather than picking a
+ * type, so infer it and default to file, which is the most permissive.
+ */
+export function inferAttachmentType(url: string): AttachmentType {
+  const path = url.split("?")[0].split("#")[0].toLowerCase();
+  if (/\.(jpe?g|png|gif|webp)$/.test(path)) return "image";
+  if (/\.(mp4|mov|webm)$/.test(path)) return "video";
+  if (/\.(mp3|m4a|wav|ogg)$/.test(path)) return "audio";
+  return "file";
+}
+
 export async function sendDirectMessage(
   accessToken: string,
   instagramAccountId: string,
@@ -754,6 +813,68 @@ export async function subscribeInstagramAccountToWebhooks(
       }),
     }
   );
+
+  return handleResponse(response);
+}
+
+export interface ConversationStarter {
+  /** Shown as a tappable prompt when someone opens a fresh DM thread. */
+  question: string;
+  /** Echoed back as a postback payload when tapped. */
+  payload: string;
+}
+
+/**
+ * Set the prompts Instagram shows someone opening a conversation for the first
+ * time. Account-level rather than per-campaign, and replaces the whole set on
+ * every call, so callers send the full list rather than a delta.
+ *
+ * Meta caps these at four.
+ */
+export async function setConversationStarters(
+  accessToken: string,
+  instagramAccountId: string,
+  starters: ConversationStarter[]
+): Promise<{ result?: string }> {
+  const response = await fetch(
+    `${instagramGraphBase()}/${instagramAccountId}/messenger_profile`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        platform: "instagram",
+        ice_breakers: starters.slice(0, 4).map((starter) => ({
+          question: starter.question,
+          payload: starter.payload,
+        })),
+      }),
+    }
+  );
+
+  return handleResponse(response);
+}
+
+/**
+ * Clear every conversation starter. Deleting the field is not the same as
+ * setting an empty list, which Meta rejects.
+ */
+export async function clearConversationStarters(
+  accessToken: string,
+  instagramAccountId: string
+): Promise<{ result?: string }> {
+  const url = new URL(
+    `${instagramGraphBase()}/${instagramAccountId}/messenger_profile`
+  );
+  url.searchParams.set("platform", "instagram");
+  url.searchParams.set("fields", JSON.stringify(["ice_breakers"]));
+
+  const response = await fetch(url.toString(), {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
 
   return handleResponse(response);
 }
