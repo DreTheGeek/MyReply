@@ -100,6 +100,10 @@ export default function CampaignsPage() {
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState("all");
   const [loading, setLoading] = useState(true);
+  // Without this a failed fetch left the list empty and the page told a
+  // workspace with twelve live campaigns that it had none, with a button to
+  // create its first. That reads as data loss.
+  const [loadError, setLoadError] = useState<string | null>(null);
   // postId -> current thumbnail URL, fetched live (Instagram URLs expire, so
   // they are never stored on the campaign).
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
@@ -128,9 +132,17 @@ export default function CampaignsPage() {
         { cache: "no-store" },
       );
       const data = await res.json();
-      if (data.success) setAutomations(data.data);
+      if (data.success) {
+        setAutomations(data.data);
+        setLoadError(null);
+      } else {
+        setLoadError(
+          data.error ?? "We could not load your campaigns just now."
+        );
+      }
     } catch (err) {
       console.error("Failed to fetch campaigns:", err);
+      setLoadError("We could not reach the server. Check your connection.");
     } finally {
       setLoading(false);
     }
@@ -438,8 +450,28 @@ export default function CampaignsPage() {
         </div>
       )}
 
+      {/* The list could not be loaded. Never fall through to the empty
+          state here: "no campaigns" and "we could not ask" are different
+          facts and only one of them is the customer's problem. */}
+      {loadError && (
+        <div className="rounded border border-error/30 bg-error/5 p-4 text-sm">
+          <p className="font-medium text-error">Could not load campaigns</p>
+          <p className="mt-1 text-muted">{loadError}</p>
+          <button
+            type="button"
+            onClick={() => {
+              setLoading(true);
+              void fetchAutomations();
+            }}
+            className="mt-3 rounded border border-border px-3 py-1.5 text-sm text-muted hover:text-foreground"
+          >
+            Try again
+          </button>
+        </div>
+      )}
+
       {/* Empty state */}
-      {automations.length === 0 && (
+      {!loadError && automations.length === 0 && (
         <div className="panel rounded p-8 text-center sm:p-12">
           <h3 className="mb-2 text-lg font-semibold">No campaigns yet</h3>
           <p className="mx-auto mb-6 max-w-sm text-sm text-muted">
@@ -456,7 +488,7 @@ export default function CampaignsPage() {
       )}
 
       {/* No matches for the current filter */}
-      {automations.length > 0 && filtered.length === 0 && (
+      {!loadError && automations.length > 0 && filtered.length === 0 && (
         <div className="panel rounded p-8 text-center text-sm text-muted">
           No campaigns match your search.
         </div>
