@@ -24,6 +24,7 @@
 
 import { z } from "zod";
 import { prisma } from "@/lib/db/client";
+import { appSchema, qualified } from "@/lib/db/schema";
 
 /** The model the Edge Function loads. Must match MODEL in that function. */
 export const EMBEDDING_MODEL = "gte-small";
@@ -263,18 +264,10 @@ export async function embedQuery(
  * whatever the role's default path is and find nothing. The name is validated
  * because it reaches SQL as an identifier rather than as a bound parameter.
  */
-export function appSchema(): string {
-  const schema = process.env.DATABASE_SCHEMA ?? "public";
-  if (!/^[A-Za-z_][A-Za-z0-9_$]*$/.test(schema)) {
-    throw new Error("DATABASE_SCHEMA is not a valid Postgres identifier");
-  }
-  return schema;
-}
-
-/** A schema-qualified, quoted table name for a raw query. */
-export function qualified(table: string): string {
-  return `"${appSchema()}"."${table}"`;
-}
+// Imported as well as re-exported: this file uses qualified() itself, and a
+// bare re-export would not bind the name locally. Callers that have always
+// imported it from here keep working.
+export { appSchema, qualified };
 
 /**
  * pgvector's text input format.

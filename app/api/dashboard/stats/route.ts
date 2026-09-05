@@ -1,11 +1,41 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUserId, getCurrentWorkspaceId } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
+import { qualified } from "@/lib/db/schema";
 import {
   calculateCtr,
   normalizeTopKeywords,
   summarizeDmStatuses,
 } from "@/lib/tracking/analytics";
+
+/**
+ * How many distinct people this workspace has ever messaged.
+ *
+ * Raw because Prisma has no count-distinct. The schema is qualified because
+ * the pg adapter does not set search_path, and both filters are bound
+ * parameters rather than interpolated.
+ */
+async function countDistinctCommenters(
+  workspaceId: string,
+  instagramAccountId: string | null
+): Promise<number> {
+  const rows = instagramAccountId
+    ? await prisma.$queryRawUnsafe<{ count: bigint }[]>(
+        `SELECT COUNT(DISTINCT "commenterId") AS count
+           FROM ${qualified("DmLog")}
+          WHERE "workspaceId" = $1 AND "instagramAccountId" = $2`,
+        workspaceId,
+        instagramAccountId
+      )
+    : await prisma.$queryRawUnsafe<{ count: bigint }[]>(
+        `SELECT COUNT(DISTINCT "commenterId") AS count
+           FROM ${qualified("DmLog")}
+          WHERE "workspaceId" = $1`,
+        workspaceId
+      );
+
+  return Number(rows[0]?.count ?? 0);
+}
 
 export async function GET(request: NextRequest) {
   const workspaceId = await getCurrentWorkspaceId();
@@ -49,7 +79,7 @@ export async function GET(request: NextRequest) {
     topKeywordRows,
     recentLogs,
     user,
-    contactRows,
+    distinctCommenters,
   ] = await Promise.all([
     prisma.workspace.findUnique({
       where: { id: workspaceId },
@@ -142,11 +172,17 @@ export async function GET(request: NextRequest) {
         })
       : Promise.resolve(null),
     // Distinct people who have interacted, counted as "contacts".
-    prisma.dmLog.findMany({
-      where: { workspaceId, ...accountFilter },
-      distinct: ["commenterId"],
-      select: { commenterId: true },
-    }),
+    //
+    // This was a findMany with distinct and no take and no time window, which
+    // pulls one row per DmLog the workspace has ever written back into Node
+    // purely to take its length. The count belongs in the database: COUNT
+    // DISTINCT returns exactly one row however large the table gets.
+    //
+    // Deliberately NOT swapped for a Contact row count, which looks like the
+    // obvious fix and is not: contact writes are best effort and swallow their
+    // own failures, so the two numbers already disagree on live data. Keeping
+    // DmLog keeps the figure the dashboard has always shown.
+    countDistinctCommenters(workspaceId, selectedAccountId),
   ]);
 
   const dailyDMs: { date: string; count: number }[] = [];
@@ -193,7 +229,7 @@ export async function GET(request: NextRequest) {
     success: true,
     data: {
       userName: firstName,
-      contactsCount: contactRows.length,
+      contactsCount: distinctCommenters,
       workspace,
       instagramAccount,
       instagramAccounts,
