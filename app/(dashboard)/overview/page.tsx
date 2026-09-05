@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useState } from "react";
+import CommentHeatmap from "@/components/analytics/comment-heatmap";
 import AccountSelect from "@/components/account-select";
 import StatCard from "@/components/stat-card";
 import FollowerChart from "@/components/follower-chart";
@@ -185,6 +186,16 @@ export default function OverviewPage() {
 
       {/* Follower trend, account-level, independent of the post range */}
       <FollowerChart data={followerHistory} followers={followers} />
+
+      {data.commentHeatmap && (
+        <CommentHeatmap
+          matrix={data.commentHeatmap.matrix}
+          timezone={data.commentHeatmap.timezone}
+          peakLabel={data.commentHeatmap.peakLabel}
+          total={data.commentHeatmap.total}
+          windowDays={data.commentHeatmap.windowDays}
+        />
+      )}
 
       {/* Per-post table */}
       <div className="panel rounded p-4 sm:p-6">

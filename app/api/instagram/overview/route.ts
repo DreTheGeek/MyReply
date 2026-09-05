@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentWorkspaceId } from "@/lib/auth";
+import {
+  describePeak,
+  getCommentHeatmap,
+} from "@/lib/analytics/comment-heatmap";
 import { prisma } from "@/lib/db/client";
 import { getWorkspaceInstagramAccount } from "@/lib/instagram-accounts";
 import {
@@ -77,6 +81,18 @@ export interface OverviewResponse {
    * limited to what has been snapshotted plus any 30-day insights backfill.
    */
   followerHistory: FollowerHistoryPoint[];
+  /**
+   * When this account's audience comments, as a 7 x 24 grid bucketed in the
+   * workspace's own timezone. Null when the aggregate could not be read; the
+   * rest of the overview still renders.
+   */
+  commentHeatmap: {
+    matrix: number[][];
+    timezone: string;
+    total: number;
+    windowDays: number;
+    peakLabel: string | null;
+  } | null;
   totals: {
     posts: number;
     views: number;
@@ -234,6 +250,37 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Bucketed in the workspace's own timezone, so an account in New York
+    // does not read its evening peak at 11pm to 4am. One aggregate query
+    // returning at most 168 rows, however many comments the workspace has.
+    const workspace = await prisma.workspace.findUnique({
+      where: { id: workspaceId },
+      select: { timezone: true },
+    });
+
+    const heatmap = await getCommentHeatmap(
+      workspaceId,
+      workspace?.timezone ?? "UTC",
+      { instagramAccountId: account.id }
+    ).catch((error) => {
+      // A missing chart must never take the whole overview down with it.
+      console.warn(
+        "[Instagram Overview] Comment heatmap unavailable:",
+        error instanceof Error ? error.message : error
+      );
+      return null;
+    });
+
+    const commentHeatmap = heatmap
+      ? {
+          matrix: heatmap.matrix,
+          timezone: heatmap.timezone,
+          total: heatmap.total,
+          windowDays: heatmap.windowDays,
+          peakLabel: describePeak(heatmap.peak),
+        }
+      : null;
+
     const data: OverviewResponse = {
       account: { id: account.id, username: account.username },
       accounts,
@@ -242,6 +289,7 @@ export async function GET(request: NextRequest) {
       insightsAvailable: insightsAvailable && !permissionDenied,
       followers,
       followerHistory,
+      commentHeatmap,
       totals,
       posts,
     };
