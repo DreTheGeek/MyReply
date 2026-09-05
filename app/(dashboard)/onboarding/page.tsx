@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 
 export default async function OnboardingPage(): Promise<React.JSX.Element> {
   const context = await getCurrentWorkspaceContext();
-  if (!context) redirect("/login");
+  if (!context) redirect("/login?session=expired");
 
   const account = await getWorkspaceInstagramAccount(context.workspaceId);
 

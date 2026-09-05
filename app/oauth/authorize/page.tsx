@@ -82,7 +82,9 @@ export default async function AuthorizePage({
   const session = await auth();
   if (!session?.user?.id) {
     const returnTo = `${AUTHORIZE_PATH}?${toQueryString(params)}`;
-    redirect(`/login?callbackUrl=${encodeURIComponent(returnTo)}`);
+    redirect(
+      `/login?callbackUrl=${encodeURIComponent(returnTo)}&session=expired`
+    );
   }
 
   const userId = session.user.id;

@@ -12,7 +12,11 @@ export default async function DashboardLayout({
   const session = await auth();
 
   if (!session?.user?.id) {
-    redirect("/login");
+    // The cookie the browser is holding did not resolve to a session. Say so
+    // in the URL: middleware cannot tell a live cookie from a dead one without
+    // a database read, so without this marker it bounces straight back here
+    // and the two redirect at each other forever.
+    redirect("/login?session=expired");
   }
 
   const workspace = await ensureWorkspaceForUser(
