@@ -88,6 +88,7 @@ export default function SettingsPage() {
   const [startersReadable, setStartersReadable] = useState(true);
   const [starterError, setStarterError] = useState<string | null>(null);
   const [starterNotice, setStarterNotice] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -100,8 +101,19 @@ export default function SettingsPage() {
           setStarterAccountId(
             statsPayload.data.instagramAccounts?.[0]?.id ?? null
           );
+          setLoadError(null);
+        } else {
+          setLoadError(
+            statsPayload.error ?? "We could not load your workspace settings."
+          );
         }
         if (membersPayload.success) setMembersData(membersPayload.data);
+      })
+      // Without a catch this rejected unhandled and left data null, and every
+      // read below is data?.x with a fallback, so a working connected account
+      // was reported as "Not connected" with an invitation to reconnect it.
+      .catch(() => {
+        setLoadError("We could not reach the server to load your settings.");
       })
       .finally(() => setLoading(false));
   }, []);
@@ -300,6 +312,19 @@ export default function SettingsPage() {
       <Suspense fallback={null}>
         <InstagramConnectNotice />
       </Suspense>
+
+      {/* Say the settings could not be read, rather than letting every
+          data?.x fallback below describe a healthy workspace as empty and
+          disconnected. */}
+      {loadError && (
+        <div className="rounded border border-error/30 bg-error/5 p-4 text-sm">
+          <p className="font-medium text-error">Could not load settings</p>
+          <p className="mt-1 text-muted">
+            {loadError} What you see below may be incomplete, so avoid changing
+            anything until this loads.
+          </p>
+        </div>
+      )}
 
       <section className="panel rounded p-4 sm:p-6">
         <h2 className="text-base font-semibold mb-6">Instagram Connection</h2>
