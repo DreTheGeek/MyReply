@@ -112,6 +112,12 @@ model Workspace {
   /// advanced flows. BYOK AI is free on both: the key is the customer's.
   plan            WorkspacePlan @default(FREE)
 
+  /// The one voice decision the owner ever makes. Every message this product
+  /// suggests is written in this tone, so the question is asked once and then
+  /// inherited by every campaign after it. Changeable later, never blank.
+  /// The suggestion library keys off lowercase ids, see lib/suggestions/tone.ts.
+  tone            WorkspaceTone @default(FRIENDLY)
+
   usagePeriodStart  DateTime @default(now())
   dmsSentThisPeriod Int      @default(0)
 
@@ -743,6 +749,18 @@ enum AnswerVerdict {
 enum WorkspacePlan {
   FREE
   PRO
+}
+
+/// The voice every suggested message is written in. Mirrored as lowercase ids
+/// in lib/suggestions/types.ts, which is what the UI and the message library
+/// use. lib/suggestions/tone.ts owns the mapping between the two and will fail
+/// to compile if this enum and that list ever drift apart.
+enum WorkspaceTone {
+  FRIENDLY
+  PROFESSIONAL
+  HYPE
+  SHORT
+  WARM
 }
 
 /// How an OAuth client came to exist. DYNAMIC is RFC 7591 dynamic client
