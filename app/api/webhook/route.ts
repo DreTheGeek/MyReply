@@ -232,9 +232,21 @@ export async function POST(request: NextRequest) {
   const signature = request.headers.get("x-hub-signature-256");
 
   if (!verifyWebhookSignature(rawBody, signature)) {
-    // Record the attempt so a signature mismatch is visible rather than a
-    // silent 401. This is the common symptom of FACEBOOK_APP_SECRET being
-    // set to the wrong app's secret for the webhook's signing key.
+    // This is the common symptom of FACEBOOK_APP_SECRET being set to the
+    // wrong app's secret for the webhook's signing key, and while it is
+    // happening no comment reaches any campaign. So it has to be loud.
+    //
+    // The OperationalEvent below is written with no workspaceId, because at
+    // this point the payload has not been parsed and no tenant is known. Every
+    // read path for that table is scoped to a workspace, so nobody can ever
+    // see this row: it is written for a future operator view that does not
+    // exist yet. The console line is what actually reaches a human today,
+    // through the platform's own log search.
+    console.error(
+      "[Webhook] Signature verification failed.",
+      `hadSignatureHeader=${Boolean(signature)} bodyLength=${rawBody.length}.`,
+      "If this repeats, FACEBOOK_APP_SECRET is probably the wrong app's secret."
+    );
     await prisma.operationalEvent
       .create({
         data: {
@@ -248,7 +260,11 @@ export async function POST(request: NextRequest) {
           },
         },
       })
-      .catch(() => {});
+      // Swallowing this silently would have hidden the failure to record the
+      // failure. The console line above has already gone out either way.
+      .catch((error) => {
+        console.error("[Webhook] Could not record the signature failure", error);
+      });
     return NextResponse.json(
       { success: false, error: "Invalid signature" },
       { status: 401 }
