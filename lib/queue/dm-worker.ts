@@ -784,6 +784,36 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
  * The postback payload is `reveal:<automationId>`; the sender is the user's
  * IGSID (same id as their comment author id), which we DM directly.
  */
+/**
+ * A token that will not decrypt is a silent, total outage: every send using it
+ * fails identically and nothing retries. It has to leave a trace the operator
+ * can actually see, which means the workspace's own OperationalEvent feed,
+ * because that is what the diagnostics page reads.
+ */
+async function recordDecryptFailure(
+  workspaceId: string,
+  automationId: string,
+  instagramAccountId: string
+): Promise<void> {
+  try {
+    await prisma.operationalEvent.create({
+      data: {
+        workspaceId,
+        source: "WORKER",
+        level: "ERROR",
+        message: "Failed to decrypt Instagram access token",
+        payload: { automationId, instagramAccountId },
+      },
+    });
+  } catch (error) {
+    // Recording the failure must never become a second failure.
+    console.error(
+      "[DM Worker] Failed to record decrypt failure:",
+      formatError(error)
+    );
+  }
+}
+
 async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
   const { instagramAccountId, userId, payload, fallback } = job.data;
 
@@ -840,6 +870,17 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
   try {
     accessToken = decryptToken(automation.instagramAccount.accessToken);
   } catch {
+    // Returning silently here marked the job completed, so BullMQ never
+    // retried and nothing was written anywhere: no DmLog, no OperationalEvent,
+    // no console line. Rotate ENCRYPTION_KEY and every reveal DM and follow-up
+    // stops delivering while the dashboard shows zero failures, the worker
+    // heartbeat stays green and the campaigns look healthy. The equivalent
+    // path at the comment handler already records this properly.
+    await recordDecryptFailure(
+      automation.workspaceId,
+      automation.id,
+      automation.instagramAccount.id
+    );
     return;
   }
 
@@ -1012,6 +1053,17 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
   try {
     accessToken = decryptToken(automation.instagramAccount.accessToken);
   } catch {
+    // Returning silently here marked the job completed, so BullMQ never
+    // retried and nothing was written anywhere: no DmLog, no OperationalEvent,
+    // no console line. Rotate ENCRYPTION_KEY and every reveal DM and follow-up
+    // stops delivering while the dashboard shows zero failures, the worker
+    // heartbeat stays green and the campaigns look healthy. The equivalent
+    // path at the comment handler already records this properly.
+    await recordDecryptFailure(
+      automation.workspaceId,
+      automation.id,
+      automation.instagramAccount.id
+    );
     return;
   }
 
