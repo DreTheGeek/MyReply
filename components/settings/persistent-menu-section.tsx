@@ -171,26 +171,36 @@ export default function PersistentMenuSection({
     setNotice(null);
     setBusy("menu:save");
 
-    const res = await fetch(ENDPOINT, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        instagramAccountId: menuAccountId,
-        items: cleaned.map(toApiItem),
-      }),
-    });
-    const payload = await res.json();
+    // setBusy(null) as the last statement rather than a finally meant a
+    // network rejection skipped it and left the button stuck on "Saving..."
+    // until a reload, with no message.
+    try {
+      const res = await fetch(ENDPOINT, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          instagramAccountId: menuAccountId,
+          items: cleaned.map(toApiItem),
+        }),
+      });
+      const payload = await res.json();
 
-    if (payload.success) {
-      setRows(cleaned.map((row) => newMenuRow(row.title, row.type, row.target)));
-      setReadable(true);
-      setNotice(
-        "Saved. New conversations show the menu; threads already open keep the old one."
-      );
-    } else {
-      setError(payload.error ?? "Could not save the persistent menu");
+      if (payload.success) {
+        setRows(
+          cleaned.map((row) => newMenuRow(row.title, row.type, row.target))
+        );
+        setReadable(true);
+        setNotice(
+          "Saved. New conversations show the menu; threads already open keep the old one."
+        );
+      } else {
+        setError(payload.error ?? "Could not save the persistent menu");
+      }
+    } catch {
+      setError("We could not reach the server. Nothing was saved.");
+    } finally {
+      setBusy(null);
     }
-    setBusy(null);
   }
 
   async function clearMenu(): Promise<void> {
@@ -205,20 +215,25 @@ export default function PersistentMenuSection({
     setNotice(null);
     setBusy("menu:clear");
 
-    const res = await fetch(ENDPOINT, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instagramAccountId: menuAccountId }),
-    });
-    const payload = await res.json();
+    try {
+      const res = await fetch(ENDPOINT, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instagramAccountId: menuAccountId }),
+      });
+      const payload = await res.json();
 
-    if (payload.success) {
-      setRows([]);
-      setNotice("Cleared. DM threads show no menu.");
-    } else {
-      setError(payload.error ?? "Could not clear the persistent menu");
+      if (payload.success) {
+        setRows([]);
+        setNotice("Cleared. DM threads show no menu.");
+      } else {
+        setError(payload.error ?? "Could not clear the persistent menu");
+      }
+    } catch {
+      setError("We could not reach the server. Nothing was cleared.");
+    } finally {
+      setBusy(null);
     }
-    setBusy(null);
   }
 
   // The API applies the same owner-or-admin gate, so the editor is read-only

@@ -1,5 +1,7 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
+
 /**
  * DM Logs Page
  *
@@ -43,7 +45,16 @@ export default function LogsPage() {
   const [logs, setLogs] = useState<DmLog[]>([]);
   const [pagination, setPagination] = useState<Pagination | null>(null);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState("ALL");
+  // The portal's "View all" on the failures lane links here with
+  // ?status=FAILED, and the API supports it. Only this page ignored it, so the
+  // link landed on an unfiltered list with the All chip active.
+  const searchParams = useSearchParams();
+  const [statusFilter, setStatusFilter] = useState(() => {
+    const requested = searchParams.get("status");
+    return requested && STATUS_FILTERS.includes(requested)
+      ? requested
+      : "ALL";
+  });
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState("all");
   const [page, setPage] = useState(1);

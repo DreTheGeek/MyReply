@@ -169,12 +169,26 @@ export default function SettingsPage() {
     }
 
     setBusy(`disconnect:${instagramAccountId}`);
-    await fetch("/api/instagram/disconnect", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instagramAccountId }),
-    });
-    window.location.reload();
+    try {
+      const res = await fetch("/api/instagram/disconnect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instagramAccountId }),
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok || !payload?.success) {
+        // It used to reload regardless, so a member hitting the role gate
+        // confirmed the dialog, watched the page reload, and found the account
+        // still connected with nothing explaining why.
+        setLoadError(payload?.error ?? "We could not disconnect that account.");
+        setBusy(null);
+        return;
+      }
+      window.location.reload();
+    } catch {
+      setLoadError("We could not reach the server to disconnect that account.");
+      setBusy(null);
+    }
   }
 
   function updateStarter(
@@ -210,26 +224,34 @@ export default function SettingsPage() {
     setStarterNotice(null);
     setBusy("starters:save");
 
-    const res = await fetch("/api/instagram/conversation-starters", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        instagramAccountId: starterAccountId,
-        starters: cleaned,
-      }),
-    });
-    const payload = await res.json();
+    // setBusy(null) used to be the last statement rather than a finally, so a
+    // network rejection skipped it and left the button disabled on "Saving..."
+    // until a reload. Four other settings sections already got this right.
+    try {
+      const res = await fetch("/api/instagram/conversation-starters", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          instagramAccountId: starterAccountId,
+          starters: cleaned,
+        }),
+      });
+      const payload = await res.json();
 
-    if (payload.success) {
-      setStarters(
-        cleaned.map((row) => newStarterRow(row.question, row.payload))
-      );
-      setStartersReadable(true);
-      setStarterNotice("Saved. Instagram shows these on new conversations.");
-    } else {
-      setStarterError(payload.error ?? "Could not save conversation starters");
+      if (payload.success) {
+        setStarters(
+          cleaned.map((row) => newStarterRow(row.question, row.payload))
+        );
+        setStartersReadable(true);
+        setStarterNotice("Saved. Instagram shows these on new conversations.");
+      } else {
+        setStarterError(payload.error ?? "Could not save conversation starters");
+      }
+    } catch {
+      setStarterError("We could not reach the server. Nothing was saved.");
+    } finally {
+      setBusy(null);
     }
-    setBusy(null);
   }
 
   async function clearStarters() {
@@ -246,50 +268,70 @@ export default function SettingsPage() {
     setStarterNotice(null);
     setBusy("starters:clear");
 
-    const res = await fetch("/api/instagram/conversation-starters", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instagramAccountId: starterAccountId }),
-    });
-    const payload = await res.json();
+    try {
+      const res = await fetch("/api/instagram/conversation-starters", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instagramAccountId: starterAccountId }),
+      });
+      const payload = await res.json();
 
-    if (payload.success) {
-      setStarters([]);
-      setStarterNotice("Cleared. New threads open with no prompts.");
-    } else {
-      setStarterError(payload.error ?? "Could not clear conversation starters");
+      if (payload.success) {
+        setStarters([]);
+        setStarterNotice("Cleared. New threads open with no prompts.");
+      } else {
+        setStarterError(payload.error ?? "Could not clear conversation starters");
+      }
+    } catch {
+      setStarterError("We could not reach the server. Nothing was cleared.");
+    } finally {
+      setBusy(null);
     }
-    setBusy(null);
   }
 
   async function inviteMember(event: React.FormEvent) {
     event.preventDefault();
     setMemberError(null);
     setBusy("invite");
-    const res = await fetch("/api/workspace/members", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
-    });
-    const payload = await res.json();
-    if (payload.success) {
-      setMembersData(payload.data);
-      setInviteEmail("");
-    } else {
-      setMemberError(payload.error ?? "Could not invite member");
+    try {
+      const res = await fetch("/api/workspace/members", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+      });
+      const payload = await res.json();
+      if (payload.success) {
+        setMembersData(payload.data);
+        setInviteEmail("");
+      } else {
+        setMemberError(payload.error ?? "Could not invite member");
+      }
+    } catch {
+      setMemberError("We could not reach the server. No invitation was sent.");
+    } finally {
+      setBusy(null);
     }
-    setBusy(null);
   }
 
   async function removeInvitation(invitationId: string) {
     setBusy(`invite:${invitationId}`);
-    await fetch("/api/workspace/members", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ invitationId }),
-    });
-    await refreshMembers();
-    setBusy(null);
+    try {
+      const res = await fetch("/api/workspace/members", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ invitationId }),
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok || !payload?.success) {
+        setMemberError(payload?.error ?? "Could not revoke that invitation.");
+        return;
+      }
+      await refreshMembers();
+    } catch {
+      setMemberError("We could not reach the server to revoke it.");
+    } finally {
+      setBusy(null);
+    }
   }
 
   if (loading) {
@@ -408,7 +450,7 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      <section className="panel rounded p-4 sm:p-6">
+      <section id="conversation-starters" className="panel rounded p-4 sm:p-6">
         <h2 className="text-base font-semibold mb-2">Conversation starters</h2>
         <p className="text-xs text-muted mb-6">
           Tappable prompts Instagram shows someone opening a fresh DM thread with

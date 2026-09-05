@@ -68,7 +68,16 @@ export default function TopBar({
   alertCount,
 }: TopBarProps): React.JSX.Element {
   const pathname = usePathname();
-  const title = pageTitles[pathname] ?? "Portal";
+  // An exact match only, with "Portal" as the fallback, meant every dynamic
+  // route said "Portal": on /campaigns/abc the bar told you you were on the
+  // dashboard. The longest matching prefix wins so /campaigns/abc/edit reads
+  // as Campaigns rather than as somewhere else entirely.
+  const title =
+    pageTitles[pathname] ??
+    Object.entries(pageTitles)
+      .filter(([route]) => pathname.startsWith(`${route}/`))
+      .sort((a, b) => b[0].length - a[0].length)[0]?.[1] ??
+    "Portal";
 
   // The server cannot know the platform, so it renders the Ctrl hint and the
   // client corrects it during hydration. Reading it through a snapshot rather
