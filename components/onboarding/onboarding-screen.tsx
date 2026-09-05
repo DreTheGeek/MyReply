@@ -98,7 +98,16 @@ export default function OnboardingScreen({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             draftId: draft.id,
-            automation: { ...draft.automation, isActive: live },
+            automation: {
+              ...draft.automation,
+              // The spread carries isActive from the draft, which the
+              // suggester already set to false when the DM references {link}
+              // and the caption gave us no URL. Overwriting it with `live`
+              // undid that, and the campaign went out sending the literal
+              // text "{link}" to real strangers. Activate can turn a draft on,
+              // but it cannot turn on one that has nothing to link to.
+              isActive: live && !draft.needsLink,
+            },
           }),
         });
         const payload: ApiEnvelope<{ id: string }> = await res.json();

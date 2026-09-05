@@ -121,7 +121,16 @@ export default function DraftCard({
 
       <div className="mt-4 flex items-center gap-3">
         {activated ? (
-          <p className="text-sm font-semibold text-success">This one is live.</p>
+          draft.needsLink ? (
+            // Saved, but deliberately not sending. Saying "live" here would be
+            // a lie, and the person would find out from a customer.
+            <p className="text-sm text-warning">
+              Saved and paused. Its message offers a link and your caption had
+              none, so add one on the campaign and switch it on there.
+            </p>
+          ) : (
+            <p className="text-sm font-semibold text-success">This one is live.</p>
+          )
         ) : (
           <>
             <button

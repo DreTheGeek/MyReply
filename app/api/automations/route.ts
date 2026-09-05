@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentWorkspaceId } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
+import { resolveIsActive } from "@/lib/campaigns/link-readiness";
 import { calculateCtr, normalizeTopKeywords } from "@/lib/tracking/analytics";
 import { buildTrackedUrl } from "@/lib/tracking/message";
 import { generateTrackedLinkSlug } from "@/lib/tracking/server";
@@ -423,6 +424,15 @@ export async function POST(request: NextRequest) {
     .map((m) => m.trim())
     .filter(Boolean);
 
+  // A campaign whose message offers a link, with no link behind it, would
+  // send the literal text "{link}" to a real person. Save it paused instead of
+  // refusing the request, so the work is kept and nothing goes out.
+  const linkReadiness = resolveIsActive(
+    parsed.data.isActive,
+    parsed.data,
+    linkCreates.length > 0
+  );
+
   const automation = await prisma.automation.create({
     data: {
       name: parsed.data.name,
@@ -470,7 +480,7 @@ export async function POST(request: NextRequest) {
       publicReplyMessage: parsed.data.publicReplyEnabled
         ? publicReplyList[0] ?? parsed.data.publicReplyMessage ?? null
         : null,
-      isActive: parsed.data.isActive,
+      isActive: linkReadiness.isActive,
       wholeWordMatch: parsed.data.wholeWordMatch,
       workspaceId,
       instagramAccountId: instagramAccount.id,
