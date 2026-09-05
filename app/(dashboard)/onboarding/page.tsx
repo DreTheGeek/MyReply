@@ -6,10 +6,11 @@
  * component that fetches the drafts.
  *
  * A workspace with no Instagram account cannot be given suggestions at all, so
- * it is sent to the connect step rather than shown an empty screen.
+ * it gets the connect step rather than an empty screen.
  */
 
 import { redirect } from "next/navigation";
+import ConnectStep from "@/components/onboarding/connect-step";
 import OnboardingScreen from "@/components/onboarding/onboarding-screen";
 import { prisma } from "@/lib/db/client";
 import { getWorkspaceInstagramAccount } from "@/lib/instagram-accounts";
@@ -25,9 +26,11 @@ export default async function OnboardingPage(): Promise<React.JSX.Element> {
 
   const account = await getWorkspaceInstagramAccount(context.workspaceId);
 
-  // Nothing to suggest from and nothing to send with. Settings is where the
-  // connect button lives.
-  if (!account) redirect("/settings");
+  // Nothing to suggest from and nothing to send with. This used to redirect
+  // to /settings, which is a dense page whose connect button is one row among
+  // many, and the dashboard never sent anyone here in that state anyway. The
+  // first screen after signing up is now a single instruction.
+  if (!account) return <ConnectStep />;
 
   const liveCampaigns = await prisma.automation.count({
     where: { workspaceId: context.workspaceId, isActive: true },

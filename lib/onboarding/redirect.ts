@@ -13,25 +13,21 @@
 import { prisma } from "@/lib/db/client";
 
 /**
- * True when this workspace should be sent to onboarding.
+ * True when this workspace has never made a campaign.
  *
- * Two conditions, both required:
+ * One condition, deliberately. It used to also require an Instagram account,
+ * on the reasoning that without one there is nothing to suggest and those
+ * users "belong on the connect step". There was no connect step: they fell
+ * through to the portal and got the empty cockpit this file exists to avoid.
+ * Onboarding now owns that case and shows them how to connect.
  *
- *  - It has an Instagram account connected. Without one there is nothing to
- *    read and nothing to suggest, so onboarding would be as empty as the
- *    portal. Those users belong on the connect step.
- *
- *  - It has no campaigns at all. Not "no live campaigns": a user who
- *    deliberately paused everything has already been through this and would
- *    resent being sent back. Only a workspace that has never made one is new.
+ * Note it is campaigns, not live campaigns. Someone who deliberately paused
+ * everything has already been through this and would resent being sent back.
  */
 export async function shouldSeeOnboarding(
   workspaceId: string
 ): Promise<boolean> {
-  const [accounts, campaigns] = await Promise.all([
-    prisma.instagramAccount.count({ where: { workspaceId } }),
-    prisma.automation.count({ where: { workspaceId } }),
-  ]);
+  const campaigns = await prisma.automation.count({ where: { workspaceId } });
 
-  return accounts > 0 && campaigns === 0;
+  return campaigns === 0;
 }
