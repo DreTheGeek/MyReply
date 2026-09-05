@@ -104,6 +104,10 @@ export default function CampaignsPage() {
   // workspace with twelve live campaigns that it had none, with a button to
   // create its first. That reads as data loss.
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Toggling, deleting and duplicating all mutated local state without ever
+  // looking at the response, so a refused write looked exactly like a
+  // successful one until the next reload put it back.
+  const [actionError, setActionError] = useState<string | null>(null);
   // postId -> current thumbnail URL, fetched live (Instagram URLs expire, so
   // they are never stored on the campaign).
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
@@ -242,17 +246,29 @@ export default function CampaignsPage() {
   }
 
   async function toggleActive(id: string, isActive: boolean) {
+    setActionError(null);
     try {
-      await fetch(`/api/automations?id=${id}`, {
+      const res = await fetch(`/api/automations?id=${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isActive: !isActive }),
       });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok || !payload?.success) {
+        setActionError(
+          payload?.error ??
+            (isActive
+              ? "We could not pause that campaign."
+              : "We could not start that campaign.")
+        );
+        return;
+      }
       setAutomations((prev) =>
         prev.map((a) => (a.id === id ? { ...a, isActive: !isActive } : a)),
       );
     } catch (err) {
       console.error("Failed to toggle:", err);
+      setActionError("We could not reach the server. The campaign is unchanged.");
     }
   }
 
@@ -273,11 +289,20 @@ export default function CampaignsPage() {
 
   async function deleteAutomation(id: string) {
     if (!confirm("Delete this campaign? This cannot be undone.")) return;
+    setActionError(null);
     try {
-      await fetch(`/api/automations?id=${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/automations?id=${id}`, { method: "DELETE" });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok || !payload?.success) {
+        // The row must stay. Removing it here on a refused delete is the worst
+        // outcome available: it reads as gone and comes back on reload.
+        setActionError(payload?.error ?? "We could not delete that campaign.");
+        return;
+      }
       setAutomations((prev) => prev.filter((a) => a.id !== id));
     } catch (err) {
       console.error("Failed to delete:", err);
+      setActionError("We could not reach the server. The campaign is unchanged.");
     }
   }
 
@@ -314,10 +339,15 @@ export default function CampaignsPage() {
         }),
       });
       const data = await res.json();
-      if (data.success) void fetchAutomations();
-      else console.error("Duplicate failed:", data.error);
+      if (data.success) {
+        void fetchAutomations();
+      } else {
+        console.error("Duplicate failed:", data.error);
+        setActionError(data.error ?? "We could not duplicate that campaign.");
+      }
     } catch (err) {
       console.error("Failed to duplicate:", err);
+      setActionError("We could not reach the server to duplicate it.");
     }
   }
 
@@ -447,6 +477,19 @@ export default function CampaignsPage() {
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {actionError && (
+        <div className="flex items-start justify-between gap-3 rounded border border-error/30 bg-error/5 p-3 text-sm">
+          <p className="text-error">{actionError}</p>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            className="shrink-0 text-xs text-muted hover:text-foreground"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 

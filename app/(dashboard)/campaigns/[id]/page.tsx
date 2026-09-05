@@ -74,6 +74,7 @@ export default function CampaignDetailPage() {
   const [tab, setTab] = useState<Tab>("insights");
   const [previewTab, setPreviewTab] = useState<PreviewTab>("dm");
   const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/automations", { cache: "no-store" })
@@ -119,13 +120,28 @@ export default function CampaignDetailPage() {
   async function toggleActive() {
     if (!campaign) return;
     setBusy(true);
+    setActionError(null);
     try {
-      await fetch(`/api/automations?id=${campaign.id}`, {
+      // The response was never read, so a refused change still flipped the
+      // badge to LIVE. A member hitting the role gate saw no difference at all.
+      const res = await fetch(`/api/automations?id=${campaign.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isActive: !campaign.isActive }),
       });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok || !payload?.success) {
+        setActionError(
+          payload?.error ??
+            (campaign.isActive
+              ? "We could not pause this campaign."
+              : "We could not start this campaign.")
+        );
+        return;
+      }
       setCampaign({ ...campaign, isActive: !campaign.isActive });
+    } catch {
+      setActionError("We could not reach the server. Nothing changed.");
     } finally {
       setBusy(false);
     }
@@ -199,6 +215,12 @@ export default function CampaignDetailPage() {
             {campaign.isActive ? "LIVE" : "Paused"}
           </span>
         </div>
+
+        {actionError && (
+          <p className="rounded border border-error/30 bg-error/5 px-3 py-2 text-sm text-error">
+            {actionError}
+          </p>
+        )}
 
         <Summary title={triggerSummary.heading}>
           <div className="flex items-center gap-3">
