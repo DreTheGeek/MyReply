@@ -46,6 +46,11 @@ export default function InboxPage() {
 
   const [conversations, setConversations] = useState<ConversationListItem[]>([]);
   const [convLoading, setConvLoading] = useState(true);
+  // convLoading starts true and both the loader and its driving effect return
+  // early when there is no selected account, so a workspace with no Instagram
+  // connected, or one whose accounts request failed, sat on "Loading..."
+  // forever with no empty state and nothing to click.
+  const [accountsLoaded, setAccountsLoaded] = useState(false);
   const [convError, setConvError] = useState<string | null>(null);
 
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -79,7 +84,8 @@ export default function InboxPage() {
             : payload.data.selectedInstagramAccountId || next[0]?.id || "";
         });
       })
-      .catch(() => setAccounts([]));
+      .catch(() => setAccounts([]))
+      .finally(() => setAccountsLoaded(true));
   }, []);
 
   // Remember the chosen account for the next visit.
@@ -282,7 +288,22 @@ export default function InboxPage() {
             Conversations
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
-            {convLoading ? (
+            {accountsLoaded && accounts.length === 0 ? (
+              <div className="px-4 py-6">
+                <p className="text-sm text-foreground">
+                  No Instagram account connected
+                </p>
+                <p className="mt-1 text-sm text-muted">
+                  Connect one and your conversations appear here.
+                </p>
+                <a
+                  href="/api/instagram/connect"
+                  className="mt-3 inline-block rounded bg-accent px-3 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover"
+                >
+                  Connect Instagram
+                </a>
+              </div>
+            ) : convLoading ? (
               <p className="px-4 py-6 text-sm text-muted">Loading…</p>
             ) : convError ? (
               <p className="px-4 py-6 text-sm text-error">{convError}</p>
