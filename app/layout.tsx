@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Archivo, IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
+import { THEME_SCRIPT } from "@/lib/security/theme-script";
 
 // Three roles, three weights each at most, all subset to latin and served
 // self-hosted by next/font so there is no render-blocking request to Google.
@@ -59,7 +60,9 @@ export default function RootLayout({
         */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{if(localStorage.getItem("myreply-theme")==="dark"){document.documentElement.classList.add("dark")}}catch(e){}`,
+            // Shared with next.config.ts, which sends the CSP hash of this
+            // exact string. Editing it here alone would stop it running.
+            __html: THEME_SCRIPT,
           }}
         />
       </head>
