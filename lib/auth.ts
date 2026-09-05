@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import Resend from "next-auth/providers/resend";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/db/client";
+import { CURRENT_TERMS_VERSION } from "@/lib/legal/terms-version";
 import {
   type ApiKeyContext,
   extractApiKey,
@@ -31,9 +32,21 @@ export const authConfig = {
   },
   events: {
     async createUser({ user }) {
-      if (user.id) {
-        await ensureWorkspaceForUser(user.id, user.email);
-      }
+      if (!user.id) return;
+
+      // Recorded here because this fires exactly once, when the account is
+      // created, and the only way to reach it is by submitting the login form,
+      // which carries the notice and the two links. That is the moment of
+      // acceptance, so that is the moment worth stamping.
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          termsAcceptedAt: new Date(),
+          termsVersion: CURRENT_TERMS_VERSION,
+        },
+      });
+
+      await ensureWorkspaceForUser(user.id, user.email);
     },
   },
   pages: {

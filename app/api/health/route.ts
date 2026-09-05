@@ -116,6 +116,60 @@ async function checkQueue(): Promise<
   );
 }
 
+/**
+ * What is going wrong across the whole platform, not one tenant.
+ *
+ * Webhook signature failures and worker process errors are written with no
+ * workspaceId, because at the moment they happen no tenant is known. Every
+ * read path in the app is workspace-scoped, so those rows have never been
+ * visible to anybody. They are the two most important operational signals in
+ * the system and they went nowhere.
+ *
+ * This is the operator's view of them, behind the cron bearer, which already
+ * lives in the vault and is already verified. No new auth mechanism, no new
+ * secret, and nothing here is reachable by a tenant.
+ */
+async function fleetSignals() {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  const [unresolvedByLevel, orphaned, recent] = await Promise.all([
+    prisma.operationalEvent.groupBy({
+      by: ["level"],
+      where: { resolvedAt: null, createdAt: { gte: since } },
+      _count: { _all: true },
+    }),
+    // The ones nobody could see: no tenant, so no scoped query reaches them.
+    prisma.operationalEvent.count({
+      where: { workspaceId: null, resolvedAt: null, createdAt: { gte: since } },
+    }),
+    prisma.operationalEvent.findMany({
+      where: { resolvedAt: null, createdAt: { gte: since } },
+      orderBy: { createdAt: "desc" },
+      take: 10,
+      select: {
+        level: true,
+        message: true,
+        createdAt: true,
+        workspaceId: true,
+      },
+    }),
+  ]);
+
+  return {
+    windowHours: 24,
+    unresolved: Object.fromEntries(
+      unresolvedByLevel.map((row) => [row.level, row._count._all])
+    ),
+    platformLevel: orphaned,
+    recent: recent.map((event) => ({
+      level: event.level,
+      message: event.message,
+      at: event.createdAt.toISOString(),
+      scope: event.workspaceId ? "workspace" : "platform",
+    })),
+  };
+}
+
 export async function GET(request: Request) {
   // Reads the shared secret from the vault, so the detail view and the
   // scheduler agree about who the caller is.
@@ -143,6 +197,8 @@ export async function GET(request: Request) {
     ? {
         status: healthy ? "ok" : "degraded",
         checks: { database, redis, queue, worker },
+        // Only for the operator. A tenant never sees this.
+        fleet: await fleetSignals().catch(() => null),
       }
     : {
         status: healthy ? "ok" : "degraded",

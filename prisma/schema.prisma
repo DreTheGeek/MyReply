@@ -23,6 +23,20 @@ model User {
   // re-checks WorkspaceMember, so a stale or revoked id gives no access.
   activeWorkspaceId String?
 
+  /// When this person accepted the Terms and the Privacy Policy, and which
+  /// version they saw.
+  ///
+  /// Nothing recorded that anyone had ever agreed to anything. The login form
+  /// shows the notice, but a notice nobody stored is not a record: in a
+  /// dispute there was no answer to "when did they accept, and to what".
+  ///
+  /// Stamped at account creation, because that is the moment they submitted
+  /// the form carrying the notice. Nullable because every account that existed
+  /// before this column did not go through that, and backfilling a date would
+  /// be inventing evidence.
+  termsAcceptedAt DateTime?
+  termsVersion    String?
+
   accounts         Account[]
   sessions         Session[]
   ownedWorkspaces  Workspace[]           @relation("WorkspaceOwner")
