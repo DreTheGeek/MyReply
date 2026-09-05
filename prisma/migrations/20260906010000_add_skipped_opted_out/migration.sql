@@ -1,0 +1,12 @@
+-- A distinct skip reason for "this person asked us to stop".
+--
+-- The alternative was to fold it into SKIPPED_DEDUP or FAILED, and both lie.
+-- The delivery ledger's whole value is that every row says truthfully why it
+-- did not send, and "the recipient opted out" is a different fact from "we hit
+-- a limit" or "something broke". It is also the one an owner is most likely to
+-- be asked to account for.
+--
+-- ADD VALUE is additive and non-blocking: existing rows are untouched and no
+-- rewrite happens. It cannot run inside a transaction on older Postgres, but
+-- this project is on 17, where it can.
+ALTER TYPE "DmStatus" ADD VALUE IF NOT EXISTS 'SKIPPED_OPTED_OUT';

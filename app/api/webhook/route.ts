@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
+import { applyOptOut } from "@/lib/messaging/apply-opt-out";
+import { detectOptOutIntent } from "@/lib/messaging/opt-out";
 import { getDMQueue } from "@/lib/queue/client";
 import {
   parseCommentEvents,
@@ -455,6 +457,27 @@ export async function POST(request: NextRequest) {
 
     for (const event of messageEvents) {
       const account = await resolveAccountCached(event.instagramAccountId);
+
+      // Someone telling us to stop is the highest priority thing an inbound
+      // message can be, so it is handled here, before the message is queued
+      // for anything else. Recorded even when the reply is also a keyword
+      // match: "stop" is not a campaign trigger.
+      const intent = detectOptOutIntent(event.messageText);
+      if (intent && account) {
+        await applyOptOut({
+          instagramAccountId: account.id,
+          workspaceId: account.workspaceId,
+          externalId: event.senderId,
+          optOut: intent === "opt_out",
+        });
+        // An opt-out is not a message to reply to. Queuing it would let a
+        // campaign answer "STOP" with a marketing DM, which is the exact
+        // outcome the person just asked to avoid.
+        if (intent === "opt_out") {
+          await backfillWorkspace(account.workspaceId);
+          continue;
+        }
+      }
 
       await queue.add(
         MESSAGE_JOB_NAME,

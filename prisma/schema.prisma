@@ -110,13 +110,30 @@ model Workspace {
 
   /// FREE gets everything with no marginal cost. PRO adds managed AI and
   /// advanced flows. BYOK AI is free on both: the key is the customer's.
-  plan            WorkspacePlan @default(FREE)
+  plan WorkspacePlan @default(FREE)
 
   /// The one voice decision the owner ever makes. Every message this product
   /// suggests is written in this tone, so the question is asked once and then
   /// inherited by every campaign after it. Changeable later, never blank.
   /// The suggestion library keys off lowercase ids, see lib/suggestions/tone.ts.
-  tone            WorkspaceTone @default(FRIENDLY)
+  tone WorkspaceTone @default(FRIENDLY)
+
+  /// The workspace's own IANA timezone, and the quiet window inside it.
+  ///
+  /// This is the closest proxy the data has for the audience's clock: an
+  /// account's followers cluster around the account's own hours, and it is the
+  /// only timezone the owner ever sets or sees.
+  ///
+  /// It gates FOLLOW-UPS ONLY. A campaign's first reply is never held: someone
+  /// commented asking for the link, they are awake because they just
+  /// commented, and making them wait until morning breaks the one thing the
+  /// product promises. A follow-up is the message that lands at 3am unasked.
+  timezone          String  @default("UTC")
+  quietHoursEnabled Boolean @default(true)
+  /// Local hour quiet begins. The default window wraps midnight, 21 to 9.
+  quietHoursStart   Int     @default(21)
+  /// Local hour quiet ends.
+  quietHoursEnd     Int     @default(9)
 
   usagePeriodStart  DateTime @default(now())
   dmsSentThisPeriod Int      @default(0)
@@ -130,7 +147,7 @@ model Workspace {
   linkClicks        LinkClick[]
   webhookEvents     WebhookEvent[]
   operationalEvents OperationalEvent[]
-  activeForUsers    User[]                @relation("UserActiveWorkspace")
+  activeForUsers    User[]                 @relation("UserActiveWorkspace")
   apiKeys           ApiKey[]
   contacts          Contact[]
   tags              Tag[]
@@ -169,6 +186,14 @@ model Contact {
   /// Denormalised so a contact list does not aggregate DmLog on every render.
   dmCount            Int       @default(0)
   lastDmAt           DateTime?
+  /// Set when this person replied STOP, or one of the words people actually
+  /// use for it. Every automated send path checks this. Cleared if they later
+  /// reply START.
+  ///
+  /// Scoped to the contact, and a contact belongs to one Instagram account, so
+  /// telling one brand to stop does not opt them out of another workspace's
+  /// messages. Different senders; they only asked one of them.
+  optedOutAt         DateTime?
   /// Positive reactions this person has placed on messages we delivered.
   /// Only "react" moves this; an "unreact" is a withdrawal, not a signal, so
   /// it is deliberately not recorded and never decrements. Segmentation asks
@@ -350,8 +375,8 @@ model Automation {
   /// in one tap and carry no payload; a "text" button's payload names the
   /// follow-up to send, and is routed through the same postback handler as an
   /// opening DM button (for example `reveal:<campaign id>`).
-  quickRepliesEnabled  Boolean  @default(false)
-  quickReplies         Json?
+  quickRepliesEnabled Boolean @default(false)
+  quickReplies        Json?
 
   /// A publicly reachable image, video or PDF sent alongside the DM.
   /// Instagram fetches the URL itself, so anything behind auth, or a signed
@@ -417,10 +442,10 @@ model DmLog {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  automation       Automation       @relation(fields: [automationId], references: [id], onDelete: Cascade)
-  instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
-  contact          Contact?         @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  workspace        Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  automation       Automation        @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  instagramAccount InstagramAccount  @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+  contact          Contact?          @relation(fields: [contactId], references: [id], onDelete: SetNull)
   outboundMessages OutboundMessage[]
 
   @@unique([automationId, commentId])
@@ -444,7 +469,7 @@ model DmLog {
 /// makes recording an echo idempotent: Meta redelivers webhooks, and a
 /// redelivery finds the row already there rather than writing a second one.
 model OutboundMessage {
-  id                 String @id @default(cuid())
+  id                 String                @id @default(cuid())
   workspaceId        String
   instagramAccountId String
   /// Null when the recipient could not be resolved to a Contact. Recording the
@@ -453,14 +478,14 @@ model OutboundMessage {
   /// IGSID of the person the message went to.
   recipientId        String
   /// Meta's message id. Unique, so an echo can only ever be recorded once.
-  messageId          String @unique
+  messageId          String                @unique
   text               String
   source             OutboundMessageSource @default(MANUAL)
   /// The DmLog row this echo belongs to, when MyReply sent it. Set so a
   /// timeline that reads both tables can show one message rather than two.
   dmLogId            String?
   sentAt             DateTime
-  createdAt          DateTime @default(now())
+  createdAt          DateTime              @default(now())
 
   workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
@@ -587,19 +612,19 @@ model OperationalEvent {
 /// for the UI to say which key is configured and useless to anyone who reads
 /// the row.
 model WorkspaceAiCredential {
-  id           String     @id @default(cuid())
-  workspaceId  String     @unique
-  workspace    Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  provider     AiProvider
-  encryptedKey String
-  keyHint      String
-  model        String
+  id              String     @id @default(cuid())
+  workspaceId     String     @unique
+  workspace       Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  provider        AiProvider
+  encryptedKey    String
+  keyHint         String
+  model           String
   /// Audit stamp only. Deliberately not a foreign key: it records who set the
   /// key rather than granting anything, so it should outlive the user row.
   createdByUserId String?
   lastUsedAt      DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
 }
 
 /// Who actually sent an outbound message. AUTOMATION means MyReply sent it and
@@ -636,6 +661,9 @@ enum DmStatus {
   SKIPPED_RATE_LIMIT
   SKIPPED_PLAN_LIMIT
   SKIPPED_NO_MATCH
+  /// The recipient replied STOP. Distinct from the other skips because it is
+  /// the one an owner may be asked to account for.
+  SKIPPED_OPTED_OUT
 }
 
 enum WebhookStatus {
@@ -664,25 +692,25 @@ enum OperationalEventLevel {
 /// here can be a crawled site, an uploaded document, or a hand written answer,
 /// and a crawled source can re-sync on a schedule.
 model KnowledgeSource {
-  id          String              @id @default(cuid())
-  workspaceId String
-  kind        KnowledgeSourceKind
+  id             String              @id @default(cuid())
+  workspaceId    String
+  kind           KnowledgeSourceKind
   /// Display name. For a crawl this defaults to the hostname.
-  title       String
+  title          String
   /// Crawl root for WEBSITE, original filename for DOCUMENT, null for MANUAL.
-  url         String?
+  url            String?
   /// How deep a crawl follows links from the root. Ignored by other kinds.
-  crawlDepth  Int                 @default(1)
-  status      KnowledgeStatus     @default(PENDING)
+  crawlDepth     Int                 @default(1)
+  status         KnowledgeStatus     @default(PENDING)
   /// Why the last ingest failed, shown to the operator rather than swallowed.
-  errorMessage String?
-  lastSyncedAt DateTime?
+  errorMessage   String?
+  lastSyncedAt   DateTime?
   /// Null means never re-sync. Set for crawls the operator wants kept fresh.
   syncEveryHours Int?
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
 
-  workspace Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   chunks    KnowledgeChunk[]
 
   @@index([workspaceId])
@@ -692,13 +720,13 @@ model KnowledgeSource {
 /// One retrievable passage. Chunking happens at ingest so answering never pays
 /// to split a document, and so a citation can point at the exact passage used.
 model KnowledgeChunk {
-  id       String @id @default(cuid())
-  sourceId String
+  id        String                      @id @default(cuid())
+  sourceId  String
   /// Position within the source, so neighbouring chunks can be stitched back.
-  ordinal  Int
-  content  String
+  ordinal   Int
+  content   String
   /// Where this passage came from, for the citation shown under an answer.
-  citation String?
+  citation  String?
   /// gte-small embedding of `content`, 384 dimensions, produced by the
   /// supabase/functions/embed Edge Function. Prisma has no native vector type,
   /// so it is declared Unsupported: the client can neither select nor filter
@@ -712,7 +740,7 @@ model KnowledgeChunk {
   /// ingest that runs while the embedder is unreachable has to be able to store
   /// its passages anyway.
   embedding Unsupported("vector(384)")?
-  createdAt DateTime @default(now())
+  createdAt DateTime                    @default(now())
 
   source KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
 
@@ -723,7 +751,7 @@ model KnowledgeChunk {
 /// it. Only Tidio ships a loop like this; ManyChat's feedback goes to ManyChat
 /// rather than into your knowledge base.
 model AssistantAnswer {
-  id                 String   @id @default(cuid())
+  id                 String         @id @default(cuid())
   workspaceId        String
   instagramAccountId String?
   contactId          String?
@@ -732,12 +760,12 @@ model AssistantAnswer {
   /// 0 to 1. Below the workspace threshold the answer is not sent.
   confidence         Float
   /// True when the assistant declined and the conversation went to a human.
-  handedOff          Boolean  @default(false)
+  handedOff          Boolean        @default(false)
   /// Set by a human reviewing the answer. Null means unreviewed.
   verdict            AnswerVerdict?
   /// The corrected answer a human supplied. Fed back as a MANUAL source.
   correction         String?
-  createdAt          DateTime @default(now())
+  createdAt          DateTime       @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   contact   Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
@@ -896,7 +924,7 @@ model OAuthToken {
   scope    String
   resource String
 
-  expiresAt DateTime
+  expiresAt  DateTime
   /// Refresh tokens only: when this one was spent on a rotation. Presenting a
   /// spent token again is reuse, and revokes the whole family.
   usedAt     DateTime?
@@ -918,17 +946,17 @@ model OAuthToken {
 /// definition it started with. `definition` is validated against a Zod schema
 /// on write, so the looseness is at rest rather than in the code.
 model Flow {
-  id          String     @id @default(cuid())
+  id          String      @id @default(cuid())
   workspaceId String
   name        String
   trigger     FlowTrigger
-  isActive    Boolean    @default(false)
+  isActive    Boolean     @default(false)
   /// The node graph. Validated on write, never trusted on read.
   definition  Json
   /// Bumped on every save. A run records which version it executed.
-  version     Int        @default(1)
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  version     Int         @default(1)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   runs      FlowRun[]
@@ -940,25 +968,25 @@ model Flow {
 /// One execution. Durable, because a flow can wait inside the 24 hour window
 /// and the worker restarting must not lose where it was.
 model FlowRun {
-  id          String        @id @default(cuid())
-  flowId      String
-  workspaceId String
+  id           String        @id @default(cuid())
+  flowId       String
+  workspaceId  String
   /// Which definition version ran, so an edit mid-run cannot change the rules
   /// under a person who is already partway through.
-  version     Int
-  contactId   String?
-  status      FlowRunStatus @default(RUNNING)
+  version      Int
+  contactId    String?
+  status       FlowRunStatus @default(RUNNING)
   /// Set while a wait step is pending, so the resume cron knows when to look.
-  resumeAt    DateTime?
+  resumeAt     DateTime?
   /// Where execution is, so a resume does not restart from the top.
   cursorStepId String?
   errorMessage String?
-  startedAt   DateTime      @default(now())
-  finishedAt  DateTime?
+  startedAt    DateTime      @default(now())
+  finishedAt   DateTime?
 
-  flow      Flow      @relation(fields: [flowId], references: [id], onDelete: Cascade)
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  contact   Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  flow      Flow          @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contact   Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
   steps     FlowStepLog[]
 
   @@index([workspaceId, startedAt])
@@ -969,15 +997,15 @@ model FlowRun {
 /// What each step did, including what it declined to do and why. An operator
 /// cannot tell a skip from a failure on an empty screen.
 model FlowStepLog {
-  id       String         @id @default(cuid())
-  runId    String
-  stepId   String
-  kind     String
-  status   FlowStepStatus
+  id           String         @id @default(cuid())
+  runId        String
+  stepId       String
+  kind         String
+  status       FlowStepStatus
   /// Redacted at write time. Never store a credential here.
-  detail   Json?
+  detail       Json?
   errorMessage String?
-  at       DateTime       @default(now())
+  at           DateTime       @default(now())
 
   run FlowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
@@ -990,18 +1018,18 @@ model FlowStepLog {
 /// stopped at an anonymous click, so a campaign could report 43 clicks and
 /// never who, or what happened next.
 model Conversion {
-  id          String           @id @default(cuid())
-  workspaceId String
+  id           String           @id @default(cuid())
+  workspaceId  String
   automationId String?
-  contactId   String?
-  linkClickId String?
+  contactId    String?
+  linkClickId  String?
   /// Minor units, so there is no float anywhere near money.
-  valueCents  Int              @default(0)
-  currency    String           @default("USD")
-  source      ConversionSource
+  valueCents   Int              @default(0)
+  currency     String           @default("USD")
+  source       ConversionSource
   /// The provider's own id, so a replayed webhook cannot double count.
-  externalId  String?
-  createdAt   DateTime         @default(now())
+  externalId   String?
+  createdAt    DateTime         @default(now())
 
   workspace  Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   automation Automation? @relation(fields: [automationId], references: [id], onDelete: SetNull)

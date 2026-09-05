@@ -31,6 +31,11 @@ const {
     instagramAccount: {
       findUnique: vi.fn(),
     },
+    // Read on every send to check whether the person replied STOP.
+    contact: {
+      findUnique: vi.fn(),
+      upsert: vi.fn(),
+    },
     operationalEvent: {
       create: vi.fn(),
     },
@@ -253,6 +258,9 @@ beforeEach(() => {
     workspaceId: "workspace_123",
   });
   mockPrisma.operationalEvent.create.mockResolvedValue({});
+  // Nobody has opted out by default. The tests that care set this themselves.
+  mockPrisma.contact.findUnique.mockResolvedValue(null);
+  mockPrisma.contact.upsert.mockResolvedValue({});
   mockDecryptToken.mockReturnValue("decrypted_token");
   mockMatchKeywords.mockReturnValue({ matched: true, matchedKeyword: "LINK" });
   mockReserveWorkspaceDMSend.mockResolvedValue({
@@ -1183,6 +1191,54 @@ describe("DM Worker — DM keyword trigger", () => {
     expect(mockPrisma.dmLog.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({ status: "FAILED" }),
+      })
+    );
+  });
+});
+
+describe("DM Worker — a person who said stop", () => {
+  it("does not reply to someone who opted out, even when they comment the keyword", async () => {
+    mockPrisma.contact.findUnique.mockResolvedValue({
+      optedOutAt: new Date("2026-09-01T10:00:00Z"),
+    });
+
+    const processor = getProcessor();
+    await processor(createMockJob());
+
+    expect(mockSendPrivateReply).not.toHaveBeenCalled();
+    expect(mockSendPrivateReplyWithLinkButton).not.toHaveBeenCalled();
+    expect(mockPrisma.dmLog.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "SKIPPED_OPTED_OUT" }),
+      })
+    );
+  });
+
+  it("spends no budget and no rate-limit slot on them", async () => {
+    mockPrisma.contact.findUnique.mockResolvedValue({
+      optedOutAt: new Date("2026-09-01T10:00:00Z"),
+    });
+
+    const processor = getProcessor();
+    await processor(createMockJob());
+
+    // Checked before either reservation on purpose: someone who opted out
+    // should not consume the workspace's monthly allowance or a slot against
+    // Meta's hourly cap.
+    expect(mockReserveWorkspaceDMSend).not.toHaveBeenCalled();
+    expect(mockReserveDMSlot).not.toHaveBeenCalled();
+  });
+
+  it("still replies normally to everyone else", async () => {
+    mockPrisma.contact.findUnique.mockResolvedValue(null);
+
+    const processor = getProcessor();
+    await processor(createMockJob());
+
+    expect(mockReserveWorkspaceDMSend).toHaveBeenCalled();
+    expect(mockPrisma.dmLog.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "SKIPPED_OPTED_OUT" }),
       })
     );
   });

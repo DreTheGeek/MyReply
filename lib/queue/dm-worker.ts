@@ -12,6 +12,8 @@ import {
   type ProcessFollowUpJob,
 } from "./client";
 import { prisma } from "@/lib/db/client";
+import { canMessageContact } from "@/lib/messaging/opt-out";
+import { checkQuietHours } from "@/lib/messaging/quiet-hours";
 import {
   MetaApiError,
   RateLimitError,
@@ -503,6 +505,36 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           status: "SKIPPED_DEDUP",
           matchedKeyword: matchResult.matchedKeyword,
           errorMessage: `Another campaign (${privateReplyUsedBy.automation?.name ?? "unknown"}) already sent the one private reply Instagram allows for this comment`,
+        },
+      });
+      continue;
+    }
+
+    // Did this person already tell us to stop?
+    //
+    // Checked before any budget or rate-limit slot is reserved, so someone who
+    // opted out never consumes either. An opt-out outranks a keyword match:
+    // commenting again is not consent to be messaged again, and answering
+    // anyway is the thing they explicitly asked us not to do.
+    const optedOutContact = await prisma.contact.findUnique({
+      where: {
+        instagramAccountId_externalId: {
+          instagramAccountId: automation.instagramAccount.id,
+          externalId: commenterId,
+        },
+      },
+      select: { optedOutAt: true },
+    });
+
+    if (!canMessageContact(optedOutContact?.optedOutAt)) {
+      await prisma.dmLog.update({
+        where: {
+          automationId_commentId: { automationId: automation.id, commentId },
+        },
+        data: {
+          status: "SKIPPED_OPTED_OUT",
+          matchedKeyword: matchResult.matchedKeyword,
+          errorMessage: "This person replied STOP, so no DM was sent",
         },
       });
       continue;
@@ -1036,7 +1068,7 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
 
   const automation = await prisma.automation.findFirst({
     where: { id: automationId, isActive: true },
-    include: { instagramAccount: true },
+    include: { instagramAccount: true, workspace: true },
   });
 
   if (
@@ -1046,6 +1078,41 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
     automation.instagramAccount.instagramId !== instagramAccountId ||
     !automation.instagramAccount.accessToken
   ) {
+    return;
+  }
+
+  // Did this person tell us to stop? A follow-up is the message they are most
+  // likely to have been reacting to when they did.
+  const contact = await prisma.contact.findUnique({
+    where: {
+      instagramAccountId_externalId: {
+        instagramAccountId: automation.instagramAccount.id,
+        externalId: userId,
+      },
+    },
+    select: { optedOutAt: true },
+  });
+
+  if (!canMessageContact(contact?.optedOutAt)) {
+    return;
+  }
+
+  // Quiet hours. Only the follow-up is held: the campaign's first reply went
+  // out the moment they commented, which is the whole point of the product.
+  // This is the one that would otherwise arrive at 3am unasked.
+  //
+  // Requeued rather than dropped, so it lands when the window opens instead of
+  // never. The delay is computed against the workspace's own timezone.
+  const quiet = checkQuietHours(automation.workspace, new Date());
+  if (quiet.quiet) {
+    await getDMQueue().add(
+      "process-follow-up",
+      job.data,
+      { delay: quiet.retryAfterMs }
+    );
+    console.log(
+      `[DM Worker] Follow-up held for quiet hours (local ${quiet.localHour}:00 in ${automation.workspace.timezone}), retrying in ${Math.round(quiet.retryAfterMs / 60000)}m`
+    );
     return;
   }
 
