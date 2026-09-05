@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
+import { isCronRequest } from "@/lib/security/cron-auth";
 import {
   claimDueResyncs,
   failAbandonedIngests,
@@ -27,13 +28,10 @@ const MAX_PER_TICK = 5;
  *   2. Sources with syncEveryHours set are re-crawled when they come due.
  *
  * Auth matches the other cron routes: a bearer token compared against
- * CRON_SECRET, falling back to NEXTAUTH_SECRET.
+ * CRON_SECRET. There is no fallback: see lib/security/cron-auth.ts.
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const authHeader = request.headers.get("authorization");
-  const cronSecret = process.env.CRON_SECRET || process.env.NEXTAUTH_SECRET;
-
-  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+  if (!isCronRequest(request)) {
     return NextResponse.json(
       { success: false, error: "Unauthorized" },
       { status: 401 }

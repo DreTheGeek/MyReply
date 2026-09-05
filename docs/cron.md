@@ -51,7 +51,7 @@ Both live in `supabase_vault` and are read at run time.
 | Vault secret name | Value |
 | --- | --- |
 | `myreply_app_url` | The deployed origin with no trailing path, for example `https://app.myreply.com`. |
-| `myreply_cron_secret` | Exactly the value of `CRON_SECRET` in the app environment. If `CRON_SECRET` is unset the routes fall back to `NEXTAUTH_SECRET`, so use that instead. |
+| `myreply_cron_secret` | Exactly the value of `CRON_SECRET` in the app environment. It must be its own value. Never reuse `NEXTAUTH_SECRET`: this secret travels in an Authorization header on every tick and is recorded in the pg_net response tables, so anything put here should be assumed readable by anyone with database access. Generate one with `openssl rand -hex 32`. With `CRON_SECRET` unset the routes deny every request rather than falling back. |
 
 Create them once, on a session connection (`DIRECT_URL`, port 5432), in the
 Supabase SQL editor or psql. Never in a migration, and never in a file that
