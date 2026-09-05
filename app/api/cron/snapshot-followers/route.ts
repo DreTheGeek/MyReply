@@ -8,6 +8,11 @@ import {
   recordFollowerSnapshot,
 } from "@/lib/reports/follower-history";
 
+// How many accounts one run will snapshot.
+const MAX_ACCOUNTS_PER_RUN = Number(
+  process.env.TOKEN_SNAPSHOT_MAX_PER_RUN ?? 200
+);
+
 /**
  * Records one follower total per connected account per day.
  *
@@ -32,6 +37,15 @@ export async function GET(request: NextRequest) {
       instagramId: true,
       accessToken: true,
     },
+    // Unbounded and serial, one Meta call each, in a serverless handler on a
+    // 120 second pg_cron timeout. At a few hundred accounts it timed out mid
+    // loop and the rest were skipped, and a missed follower snapshot loses that
+    // day permanently: it cannot be backfilled from Instagram.
+    //
+    // Oldest connection first so the cap rotates rather than always cutting the
+    // same tail.
+    orderBy: { connectedAt: "asc" },
+    take: MAX_ACCOUNTS_PER_RUN,
   });
 
   let recorded = 0;

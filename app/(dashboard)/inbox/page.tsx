@@ -56,6 +56,7 @@ export default function InboxPage() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
   const [threadLoading, setThreadLoading] = useState(false);
+  const [threadError, setThreadError] = useState<string | null>(null);
 
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -158,9 +159,17 @@ export default function InboxPage() {
         if (data.success) {
           setMessages(data.data.messages);
           writeCache(msgCacheKey(conversationId), data.data.messages);
+          setThreadError(null);
+        } else if (!silent) {
+          setThreadError(data.error ?? "Could not load this conversation.");
         }
       } catch {
-        // keep whatever is shown
+        // Keeping what is on screen is right: a stale thread beats a blank
+        // one. Saying nothing was not, because the person had no way to tell
+        // a quiet conversation from a broken one, indefinitely.
+        if (!silent) {
+          setThreadError("Could not reach the server. This may be out of date.");
+        }
       } finally {
         if (!silent) setThreadLoading(false);
       }
@@ -400,6 +409,9 @@ export default function InboxPage() {
               </div>
 
               <div className="shrink-0 border-t border-border p-3">
+                {threadError && (
+                  <p className="px-4 py-2 text-xs text-error">{threadError}</p>
+                )}
                 {sendError && (
                   <p className="mb-2 text-xs text-error">{sendError}</p>
                 )}

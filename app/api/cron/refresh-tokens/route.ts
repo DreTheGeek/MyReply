@@ -9,6 +9,12 @@ import {
 
 const DAYS_BEFORE_EXPIRY = 10;
 
+// How many accounts one run will refresh. See the orderBy below for why a cap
+// here does not starve anyone.
+const MAX_ACCOUNTS_PER_RUN = Number(
+  process.env.TOKEN_REFRESH_MAX_PER_RUN ?? 200
+);
+
 export async function GET(request: NextRequest) {
   if (!isCronRequest(request)) {
     return NextResponse.json(
@@ -45,6 +51,16 @@ export async function GET(request: NextRequest) {
       instagramId: true,
       accessToken: true,
     },
+    // Soonest to expire first, with a ceiling. This ran unbounded and serially,
+    // one Meta call per account, inside a serverless handler on a 120 second
+    // pg_cron timeout: at a few hundred accounts it timed out mid loop and the
+    // rest were skipped for the day, silently.
+    //
+    // Ordering by expiry makes the cap self correcting rather than starving
+    // anyone: whatever is skipped today sits nearer the front tomorrow, and
+    // long lived tokens have weeks of runway before it matters.
+    orderBy: { tokenExpiresAt: "asc" },
+    take: MAX_ACCOUNTS_PER_RUN,
   });
 
   const results: Array<{
