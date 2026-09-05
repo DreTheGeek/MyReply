@@ -65,3 +65,36 @@ export const serverEnvSchema = z.object({
 export function validateCoreEnv() {
   return serverEnvSchema.parse(process.env);
 }
+
+/**
+ * What the WORKER needs, which is not what the web app needs.
+ *
+ * Validating the web contract inside the worker took production down: the
+ * worker has no WEBHOOK_VERIFY_TOKEN because it never serves Meta's
+ * verification handshake, so a check meant to catch misconfiguration became
+ * the misconfiguration. A process should only be held to the variables it
+ * actually reads.
+ *
+ * What is in here and why:
+ *   DATABASE_URL    every job reads and writes.
+ *   REDIS_URL       BullMQ, and an unset value silently targets localhost.
+ *   ENCRYPTION_KEY  decryptToken, on every send.
+ *   NEXTAUTH_URL    buildTrackedUrl falls back to http://localhost:3000 when
+ *                   this is missing, so the worker would send real customers a
+ *                   link to a machine that is not on the internet. Silent, and
+ *                   only visible as clicks that never arrive.
+ *
+ * What is deliberately absent: NEXTAUTH_SECRET (no sessions here),
+ * INSTAGRAM_APP_ID and the two app secrets (OAuth and webhook signature
+ * verification are the web app's job), WEBHOOK_VERIFY_TOKEN (same).
+ */
+export const workerEnvSchema = z.object({
+  DATABASE_URL: z.string().min(1),
+  REDIS_URL: z.string().min(1),
+  ENCRYPTION_KEY: z.string().regex(HEX_32_BYTE),
+  NEXTAUTH_URL: z.string().url(),
+});
+
+export function validateWorkerEnv() {
+  return workerEnvSchema.parse(process.env);
+}

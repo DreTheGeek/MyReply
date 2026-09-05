@@ -1,19 +1,18 @@
-import { validateCoreEnv } from "@/lib/env";
+import { validateWorkerEnv } from "@/lib/env";
 import { createDMWorker } from "@/lib/queue/dm-worker";
 import { recordWorkerHeartbeat } from "@/lib/ops/worker-health";
 import { reconcileComments } from "@/lib/polling/comment-reconciler";
 import os from "node:os";
 
-// lib/env.ts has had a complete Zod schema for the nine required server
-// variables since it was written, and nothing ever called it. A missing key
-// surfaced as a throw deep inside a job instead of a refusal to start.
+// Validated against the WORKER's contract, not the web app's.
 //
-// The worker is the right place to enforce it: it is a long lived process with
-// a real boot, unlike the serverless handlers, and every send in the product
-// goes through it. Failing here is loud, immediate, and restarts cleanly once
-// the variable is set.
+// This first shipped calling validateCoreEnv(), which demands all nine server
+// variables including WEBHOOK_VERIFY_TOKEN. The worker does not serve Meta's
+// verification handshake and has never had that variable, so the check meant
+// to catch a misconfiguration became one, and the worker crash-looped on
+// deploy. A process should only be held to what it actually reads.
 try {
-  validateCoreEnv();
+  validateWorkerEnv();
 } catch (error) {
   console.error(
     "[DM Worker] Refusing to start: the environment is incomplete.",
