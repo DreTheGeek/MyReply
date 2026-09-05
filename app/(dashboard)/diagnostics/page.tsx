@@ -179,11 +179,15 @@ export default function DiagnosticsPage() {
             Health, queues, webhook failures, billing events, and worker alerts.
           </p>
         </div>
+        {/* The loading guard above only fires when there is no data, so with
+            data present nothing on screen changed while this ran and the button
+            stayed clickable throughout. */}
         <button
           onClick={() => void refreshDiagnostics()}
-          className="rounded border border-border bg-surface px-4 py-2 text-sm font-semibold text-foreground transition hover:border-border-hover"
+          disabled={loading}
+          className="rounded border border-border bg-surface px-4 py-2 text-sm font-semibold text-foreground transition hover:border-border-hover disabled:opacity-50"
         >
-          Refresh
+          {loading ? "Refreshing..." : "Refresh"}
         </button>
       </div>
 

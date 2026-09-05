@@ -45,6 +45,15 @@ function ErrorCard({
         <div className="panel rounded p-8">
           <h1 className="text-lg font-semibold text-foreground">{title}</h1>
           <p className="mt-3 text-sm leading-relaxed text-muted">{detail}</p>
+          {/* This is a full screen page with no header, so without a link the
+              person is stuck with the back button and a half finished
+              authorization. */}
+          <a
+            href="/dashboard"
+            className="mt-6 inline-block rounded border border-border px-4 py-2 text-sm font-medium text-muted transition-colors hover:text-foreground"
+          >
+            Back to MyReply
+          </a>
         </div>
       </div>
     </main>

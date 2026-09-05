@@ -559,8 +559,19 @@ export default function CampaignsPage() {
               return (
                 <div
                   key={auto.id}
+                  role="link"
+                  tabIndex={0}
+                  aria-label={`Open ${auto.name}`}
                   onClick={() => router.push(`/campaigns/${auto.id}`)}
-                  className="panel cursor-pointer rounded p-4 transition-all hover:border-border-hover"
+                  onKeyDown={(e) => {
+                    // Space and Enter both, because this is announced as a link
+                    // but behaves like a button, and people try both.
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      router.push(`/campaigns/${auto.id}`);
+                    }
+                  }}
+                  className="panel cursor-pointer rounded p-4 transition-all hover:border-border-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                 >
                   <div className="flex items-start gap-3">
                     {trigger.showsPost &&
@@ -590,8 +601,8 @@ export default function CampaignsPage() {
                         </button>
                       ) : (
                         <a
-                          href={auto.postUrl ?? "#"}
-                          target="_blank"
+                          href={auto.postUrl ?? undefined}
+                          target={auto.postUrl ? "_blank" : undefined}
                           rel="noreferrer"
                           onClick={(e) => e.stopPropagation()}
                           className="shrink-0"
