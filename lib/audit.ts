@@ -18,15 +18,43 @@ import { prisma } from "@/lib/db/client";
  * an incident. The diagnostics page reads unresolved events, and filling it
  * with routine deletions would bury the failures it exists to surface.
  */
-export type AuditAction =
-  | "campaign.deleted"
-  | "instagram_account.disconnected"
-  | "member.removed"
-  | "invitation.revoked"
-  | "knowledge_source.deleted"
-  | "tag.deleted"
-  | "ai_credential.deleted"
-  | "api_key.revoked";
+/**
+ * Every action worth a permanent record.
+ *
+ * A const array rather than a bare union because the reader needs the list at
+ * runtime: audit rows share the OperationalEvent table with worker failures
+ * and webhook warnings, and the message being one of these is what
+ * distinguishes them. Deriving the type from the array keeps the two from
+ * drifting apart.
+ */
+export const AUDIT_ACTIONS = [
+  "campaign.deleted",
+  "instagram_account.disconnected",
+  "member.removed",
+  "invitation.revoked",
+  "knowledge_source.deleted",
+  "tag.deleted",
+  "ai_credential.deleted",
+  "api_key.revoked",
+  // Not destructive, but the one action that takes the workspace's data off
+  // the platform, so it leaves a trace saying who and how much.
+  "data.exported",
+] as const;
+
+export type AuditAction = (typeof AUDIT_ACTIONS)[number];
+
+/** What each action reads as on screen. */
+export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
+  "campaign.deleted": "Campaign deleted",
+  "instagram_account.disconnected": "Instagram account disconnected",
+  "member.removed": "Member removed",
+  "invitation.revoked": "Invitation revoked",
+  "knowledge_source.deleted": "Knowledge source deleted",
+  "tag.deleted": "Tag deleted",
+  "ai_credential.deleted": "AI key removed",
+  "api_key.revoked": "API key revoked",
+  "data.exported": "Data exported",
+};
 
 export interface AuditEntry {
   workspaceId: string;

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import FollowerSparkline from "@/components/reports/follower-sparkline";
 import { getCampaignReportBySlug } from "@/lib/reports/data";
 
 type ReportPageProps = {
@@ -147,6 +148,43 @@ export default async function ReportPage({ params }: ReportPageProps) {
             helper="Clicks divided by sent replies."
           />
         </div>
+
+        {/* Follower growth over the same period.
+            This is the one number in the report Instagram will not give back
+            once a day is missed, and it was being snapshotted daily while
+            rendering on a single internal page. A client asks what the
+            campaign did for the account, and sends and clicks answer half of
+            that. */}
+        {report.followers.history.length >= 2 && (
+          <section className="mt-8 border border-white/10 bg-white/[0.035] p-4 sm:p-6">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="text-xl font-black text-white">
+                  Followers
+                </h2>
+                <p className="mt-2 text-sm text-zinc-400">
+                  Daily total across the last {report.followers.windowDays} days.
+                </p>
+              </div>
+              {report.followers.change !== null && (
+                <p className="text-sm text-zinc-300">
+                  <span
+                    className={
+                      report.followers.change >= 0
+                        ? "font-black text-emerald-400"
+                        : "font-black text-rose-400"
+                    }
+                  >
+                    {report.followers.change >= 0 ? "+" : ""}
+                    {report.followers.change.toLocaleString()}
+                  </span>{" "}
+                  over the period
+                </p>
+              )}
+            </div>
+            <FollowerSparkline points={report.followers.history} />
+          </section>
+        )}
 
         <div className="mt-8 grid gap-6 lg:grid-cols-[1.35fr_0.65fr]">
           <section className="border border-white/10 bg-white/[0.035] p-4 sm:p-6">

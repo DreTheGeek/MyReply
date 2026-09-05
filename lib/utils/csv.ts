@@ -85,3 +85,78 @@ export function instagramShortcode(value: string): string | null {
   const match = value.match(/instagram\.com\/(?:reels?|p|tv)\/([A-Za-z0-9_-]+)/i);
   return match ? match[1] : null;
 }
+
+/**
+ * RFC 4180 cell escaping.
+ *
+ * Wrapped in quotes when the value contains a comma, a newline or a quote,
+ * with embedded quotes doubled. Null and undefined render as empty rather than
+ * the literal words, which a spreadsheet would import as text.
+ */
+export function escapeCsvCell(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) return "";
+  const text = String(value);
+  if (/[",\n\r]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+}
+
+/**
+ * Formula-injection defence, per OWASP.
+ *
+ * A cell whose first character is =, @, + or - is executed as a formula when
+ * the file is opened in Excel, Sheets or Numbers. An Instagram username or a
+ * DM body is attacker-controlled text that lands in this export, so
+ * `=cmd|'/c calc'!A1` as a display name would run on the machine of whoever
+ * opens it.
+ *
+ * The fix is to prepend a single quote, which spreadsheets read as
+ * "treat as text" and do not display. The offending character is deliberately
+ * NOT stripped: that would silently corrupt real data, and "+1 555..." or a
+ * handle starting with "-" are legitimate values somebody may need back.
+ *
+ * Leading whitespace is skipped when deciding, because some spreadsheet
+ * versions trim it before parsing, so " =EVIL()" is the same attack.
+ */
+const FORMULA_TRIGGERS = new Set(["=", "@", "+", "-"]);
+
+export function sanitizeCsvCell(value: string): string {
+  if (value === "") return value;
+  const leading = value.replace(/^\s+/, "");
+  if (leading.length === 0) return value;
+  return FORMULA_TRIGGERS.has(leading.charAt(0)) ? `'${value}` : value;
+}
+
+export interface CsvColumn<T> {
+  header: string;
+  value: (row: T) => string | number | null | undefined;
+}
+
+/**
+ * Rows to a CSV document.
+ *
+ * Sanitise first, then escape. The other order would quote the cell before the
+ * leading quote was added, putting the guard inside the quoted value where a
+ * spreadsheet never sees it.
+ */
+export function toCsv<T>(rows: readonly T[], columns: readonly CsvColumn<T>[]): string {
+  const lines: string[] = [
+    columns.map((column) => escapeCsvCell(column.header)).join(","),
+  ];
+
+  for (const row of rows) {
+    lines.push(
+      columns
+        .map((column) => {
+          const raw = column.value(row);
+          if (raw === null || raw === undefined) return "";
+          return escapeCsvCell(sanitizeCsvCell(String(raw)));
+        })
+        .join(",")
+    );
+  }
+
+  // CRLF, which is what RFC 4180 specifies and what Excel expects.
+  return lines.join("\r\n");
+}

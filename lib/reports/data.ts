@@ -4,7 +4,14 @@ import {
   normalizeTopKeywords,
   summarizeDmStatuses,
 } from "@/lib/tracking/analytics";
+import {
+  getFollowerHistory,
+  type FollowerHistoryPoint,
+} from "@/lib/reports/follower-history";
 import { buildReportUrl, isReportBranded } from "@/lib/reports/share";
+
+/** Matches the overview chart, so the two never disagree. */
+const FOLLOWER_WINDOW_DAYS = 90;
 
 function getHostname(url: string) {
   try {
@@ -49,6 +56,7 @@ export async function getCampaignReportBySlug(shareSlug: string) {
       },
       instagramAccount: {
         select: {
+          id: true,
           username: true,
         },
       },
@@ -149,6 +157,25 @@ export async function getCampaignReportBySlug(shareSlug: string) {
     })
   );
 
+  // Follower history is the one number in this report that Instagram will not
+  // give back once a day is missed, and it was being snapshotted daily while
+  // rendering on a single internal page. It belongs here: an agency's client
+  // asks what the campaign did for the account, and "sends and clicks" is only
+  // half of that answer.
+  //
+  // Failure is not fatal. A report that loses its chart is a worse report; a
+  // report that 500s is not a report.
+  const followerHistory = await getFollowerHistory(
+    automation.instagramAccount.id,
+    FOLLOWER_WINDOW_DAYS
+  ).catch(() => [] as FollowerHistoryPoint[]);
+
+  const followerChange =
+    followerHistory.length >= 2
+      ? followerHistory[followerHistory.length - 1].followers -
+        followerHistory[0].followers
+      : null;
+
   return {
     shareSlug: automation.reportShareSlug,
     reportUrl: buildReportUrl(automation.reportShareSlug),
@@ -166,6 +193,12 @@ export async function getCampaignReportBySlug(shareSlug: string) {
       createdAt: automation.createdAt,
       updatedAt: automation.updatedAt,
       instagramUsername: automation.instagramAccount.username,
+    },
+    followers: {
+      history: followerHistory,
+      /** Net change across the window, or null when there is too little data. */
+      change: followerChange,
+      windowDays: FOLLOWER_WINDOW_DAYS,
     },
     metrics: {
       sent: statusSummary.sent,
