@@ -53,3 +53,26 @@ async function shutdown(signal: string) {
 
 process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
+
+// BullMQ job failures and worker errors are already recorded. Anything thrown
+// outside those paths had no handler at all, so the process died with the
+// reason going only to the container's stdout as an unhandled rejection
+// warning. These at least name it before the process goes.
+process.on("unhandledRejection", (reason) => {
+  console.error("[DM Worker] Unhandled rejection:", reason);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("[DM Worker] Uncaught exception:", error);
+  // Deliberately fatal, and deliberately NOT through shutdown(), which exits
+  // 0. railway.json sets restartPolicyType ON_FAILURE, so a zero exit would
+  // read as a clean stop and the worker would never come back. Every send in
+  // the product goes through this process, so it has to fail loudly enough to
+  // be restarted.
+  clearInterval(heartbeatTimer);
+  clearInterval(pollTimer);
+  void worker
+    .close()
+    .catch(() => {})
+    .finally(() => process.exit(1));
+});

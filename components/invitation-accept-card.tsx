@@ -19,24 +19,34 @@ export default function InvitationAcceptCard({
   async function acceptInvite() {
     setBusy(true);
     setMessage(null);
-    const response = await fetch("/api/workspace/invitations/accept", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token }),
-    });
-    const payload = await response.json();
-    if (payload.success) {
-      window.location.assign("/dashboard");
-      return;
+    try {
+      const response = await fetch("/api/workspace/invitations/accept", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (payload?.success) {
+        window.location.assign("/dashboard");
+        return;
+      }
+      setMessage(payload?.error ?? "Could not accept invitation");
+      setBusy(false);
+    } catch {
+      // Without this a rejection left busy true and the button stuck on
+      // "Accepting..." with no way to try again.
+      setMessage("We could not reach the server. Try again in a moment.");
+      setBusy(false);
     }
-    setMessage(payload.error ?? "Could not accept invitation");
-    setBusy(false);
   }
 
   if (!isSignedIn) {
     return (
+      // Signing in without a callbackUrl dropped the invitation: the person
+      // landed on the dashboard and had to go back to their email to find the
+      // link again. The OAuth consent screen already does this correctly.
       <a
-        href="/login"
+        href={`/login?callbackUrl=${encodeURIComponent(`/invite/${token}`)}`}
         className="inline-flex items-center justify-center rounded-xl bg-accent px-5 py-3 text-sm font-semibold text-on-accent transition hover:bg-accent-hover"
       >
         Sign in to accept
