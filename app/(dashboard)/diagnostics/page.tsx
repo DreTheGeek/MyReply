@@ -71,28 +71,62 @@ function Section({
 export default function DiagnosticsPage() {
   const [data, setData] = useState<DiagnosticsData | null>(null);
   const [loading, setLoading] = useState(true);
+  // Every read below is data?.x with a fallback, so without this the page
+  // rendered a complete and entirely invented all-clear whenever the request
+  // failed: "Queue waiting 0", "No DM failures or skips", "No failed webhook
+  // events". A MEMBER, who gets a 403 from this endpoint and sees the link in
+  // the sidebar regardless, saw a full operational report in which every
+  // number was a lie.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  async function refreshDiagnostics() {
+  async function load(): Promise<void> {
     setLoading(true);
-    const response = await fetch("/api/admin/diagnostics");
-    const payload = await response.json();
-    if (payload.success) {
-      setData(payload.data);
+    try {
+      const response = await fetch("/api/admin/diagnostics");
+      const payload = await response.json();
+      if (payload.success) {
+        setData(payload.data);
+        setLoadError(null);
+      } else {
+        setLoadError(
+          response.status === 403
+            ? "Diagnostics are limited to workspace owners and admins."
+            : (payload.error ?? "Could not load diagnostics.")
+        );
+      }
+    } catch {
+      setLoadError("Could not reach the server to load diagnostics.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
+
+  const refreshDiagnostics = load;
 
   useEffect(() => {
     let active = true;
 
     async function loadInitialDiagnostics() {
-      const response = await fetch("/api/admin/diagnostics");
-      const payload = await response.json();
-      if (active && payload.success) {
-        setData(payload.data);
-      }
-      if (active) {
-        setLoading(false);
+      try {
+        const response = await fetch("/api/admin/diagnostics");
+        const payload = await response.json();
+        if (!active) return;
+        if (payload.success) {
+          setData(payload.data);
+          setLoadError(null);
+        } else {
+          setLoadError(
+            response.status === 403
+              ? "Diagnostics are limited to workspace owners and admins."
+              : (payload.error ?? "Could not load diagnostics.")
+          );
+        }
+      } catch {
+        if (active) {
+          setLoadError("Could not reach the server to load diagnostics.");
+        }
+      } finally {
+        if (active) setLoading(false);
       }
     }
 
@@ -105,6 +139,28 @@ export default function DiagnosticsPage() {
 
   if (loading && !data) {
     return <div className="panel rounded p-8 h-64" />;
+  }
+
+  // No numbers at all beats invented ones.
+  if (loadError && !data) {
+    return (
+      <div className="mx-auto max-w-5xl">
+        <div className="panel rounded p-8 text-center">
+          <h1 className="text-lg font-semibold text-foreground">
+            Diagnostics unavailable
+          </h1>
+          <p className="mx-auto mt-2 max-w-md text-sm text-muted">{loadError}</p>
+          <button
+            type="button"
+            onClick={() => void load()}
+            disabled={loading}
+            className="mt-6 rounded border border-border px-4 py-2 text-sm text-muted hover:text-foreground disabled:opacity-50"
+          >
+            {loading ? "Retrying..." : "Try again"}
+          </button>
+        </div>
+      </div>
+    );
   }
 
   const workerAgeSeconds =
