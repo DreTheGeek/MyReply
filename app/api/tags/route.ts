@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { ensureTag } from "@/lib/contacts";
 import { prisma } from "@/lib/db/client";
+import { recordAuditEvent } from "@/lib/audit";
 import {
   canManageWorkspace,
   getCurrentWorkspaceContext,
@@ -138,6 +139,13 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
       { status: 404 }
     );
   }
+
+  await recordAuditEvent({
+    workspaceId: context.workspaceId,
+    action: "tag.deleted",
+    actorUserId: context.userId,
+    targetId: parsed.data.id,
+  });
 
   return NextResponse.json({
     success: true,

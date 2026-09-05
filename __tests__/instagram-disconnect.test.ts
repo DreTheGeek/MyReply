@@ -81,15 +81,17 @@ describe("POST /api/instagram/disconnect", () => {
   it("records who disconnected what, since the campaigns go with it", async () => {
     await POST(post({ instagramAccountId: "account_1" }));
 
+    // Written through the shared recordAuditEvent helper, which every
+    // destructive route now uses, so the shape is the same everywhere.
     expect(mockPrisma.operationalEvent.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           workspaceId: "workspace_1",
-          message: "Instagram account disconnected",
-          payload: {
-            instagramAccountId: "account_1",
+          message: "instagram_account.disconnected",
+          payload: expect.objectContaining({
             actorUserId: "user_1",
-          },
+            targetId: "account_1",
+          }),
         }),
       })
     );

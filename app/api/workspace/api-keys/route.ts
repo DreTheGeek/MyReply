@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/client";
+import { recordAuditEvent } from "@/lib/audit";
 import { generateApiKey } from "@/lib/api-keys";
 import {
   canManageWorkspace,
@@ -176,6 +177,14 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
       { status: 404 }
     );
   }
+
+  // revokedAt already records when. This records who, which it could not.
+  await recordAuditEvent({
+    workspaceId: context.workspaceId,
+    action: "api_key.revoked",
+    actorUserId: context.userId,
+    targetId: parsed.data.id,
+  });
 
   return NextResponse.json({ success: true });
 }

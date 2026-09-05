@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { recordAuditEvent } from "@/lib/audit";
 import { prisma } from "@/lib/db/client";
 import {
   canManageWorkspace,
@@ -73,26 +74,12 @@ export async function POST(request: NextRequest) {
 
   // Disconnecting destroys the campaigns and the delivery history behind it,
   // so it leaves a trace saying who did it and when.
-  await prisma.operationalEvent
-    .create({
-      data: {
-        workspaceId: context.workspaceId,
-        source: "SYSTEM",
-        level: "INFO",
-        message: "Instagram account disconnected",
-        payload: {
-          instagramAccountId: parsed.data.instagramAccountId,
-          actorUserId: context.userId || null,
-        },
-        resolvedAt: new Date(),
-      },
-    })
-    .catch((error) => {
-      // The account is already gone. Failing the response now would tell the
-      // caller the disconnect did not happen, which is worse than a missing
-      // audit row, so this is logged and swallowed on purpose.
-      console.error("Failed to record disconnect audit event", error);
-    });
+  await recordAuditEvent({
+    workspaceId: context.workspaceId,
+    action: "instagram_account.disconnected",
+    actorUserId: context.userId,
+    targetId: parsed.data.instagramAccountId,
+  });
 
   return NextResponse.json({ success: true });
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { z } from "zod";
 import { checkPlanFeature } from "@/lib/plan-gate";
 import { prisma } from "@/lib/db/client";
+import { recordAuditEvent } from "@/lib/audit";
 import {
   MAX_CRAWL_DEPTH,
   MIN_CRAWL_DEPTH,
@@ -372,6 +373,13 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
       { status: 404 }
     );
   }
+
+  await recordAuditEvent({
+    workspaceId: context.workspaceId,
+    action: "knowledge_source.deleted",
+    actorUserId: context.userId,
+    targetId: parsed.data.id,
+  });
 
   return NextResponse.json({ success: true });
 }

@@ -13,6 +13,7 @@ import {
   getWorkspaceAiKeyStatus,
   saveWorkspaceAiKey,
 } from "@/lib/ai/workspace-key";
+import { recordAuditEvent } from "@/lib/audit";
 import {
   canManageWorkspace,
   getCurrentWorkspaceContext,
@@ -155,6 +156,12 @@ export async function DELETE() {
       { status: 404 }
     );
   }
+
+  await recordAuditEvent({
+    workspaceId: context.workspaceId,
+    action: "ai_credential.deleted",
+    actorUserId: context.userId,
+  });
 
   return NextResponse.json({
     success: true,

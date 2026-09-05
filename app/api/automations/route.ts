@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentWorkspaceId } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
+import { recordAuditEvent } from "@/lib/audit";
 import { resolveIsActive } from "@/lib/campaigns/link-readiness";
 import { calculateCtr, normalizeTopKeywords } from "@/lib/tracking/analytics";
 import { buildTrackedUrl } from "@/lib/tracking/message";
@@ -704,6 +705,15 @@ export async function DELETE(request: NextRequest) {
   }
 
   await prisma.automation.delete({ where: { id: automationId } });
+
+  // Deleting a campaign cascades its DmLog rows, so this is the only surviving
+  // record that those sends ever happened.
+  await recordAuditEvent({
+    workspaceId,
+    action: "campaign.deleted",
+    targetId: automationId,
+    detail: { name: existing.name },
+  });
 
   return NextResponse.json({ success: true, data: { deleted: true } });
 }
