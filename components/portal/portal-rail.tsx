@@ -147,8 +147,15 @@ export default function PortalRail({
 
       <section>
         <SectionHeading title="Usage" />
-        {loading || !usage ? (
+        {loading ? (
           <div className="h-12 rounded bg-surface-hover" />
+        ) : !usage ? (
+          // The centre column renders a proper error panel when the summary
+          // fails, but this kept its loading bar, so half the screen looked
+          // broken rather than errored.
+          <p className="rounded border border-border bg-background px-2.5 py-2.5 text-[11px] text-muted">
+            Usage is unavailable right now.
+          </p>
         ) : (
           <div className="rounded border border-border bg-background px-2.5 py-2.5">
             <div className="flex items-baseline justify-between gap-2">

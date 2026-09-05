@@ -48,6 +48,24 @@ export default function PublicSiteHeader({ active }: PublicSiteHeaderProps) {
           </Link>
         </div>
       </div>
+
+      {/* The same links as a wrapping row below the bar, shown only where the
+          row above is hidden. A disclosure menu would need client state and
+          this header renders on prerendered marketing pages, so the cheaper
+          answer is the right one. */}
+      <nav className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-white/10 px-5 py-3 md:hidden">
+        {navLinks.map((link) => (
+          <Link
+            key={link.key}
+            href={link.href}
+            className={`text-sm font-medium transition ${
+              active === link.key ? "text-white" : "text-zinc-400 hover:text-white"
+            }`}
+          >
+            {link.label}
+          </Link>
+        ))}
+      </nav>
     </header>
   );
 }

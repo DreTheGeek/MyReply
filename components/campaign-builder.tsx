@@ -144,6 +144,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
 
   const [name, setName] = useState("");
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
+  const [accountsLoaded, setAccountsLoaded] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState("");
 
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -247,7 +248,8 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
           (prev) => prev || payload.data.selectedInstagramAccountId || next[0]?.id || ""
         );
       })
-      .catch(() => setAccounts([]));
+      .catch(() => setAccounts([]))
+      .finally(() => setAccountsLoaded(true));
   }, []);
 
   // Prefill when editing.
@@ -401,7 +403,15 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   async function handleSubmit(activeValue: boolean) {
     setError(null);
 
-    if (!selectedAccountId) return setError("Connect an Instagram account first.");
+    // The account selector only renders when there is more than one account,
+    // so a workspace with none saw no selector either: they filled in the whole
+    // form, hit save, and got a bare string with nowhere to go. The panel above
+    // the form now catches this before any of that.
+    if (!selectedAccountId) {
+      return setError(
+        "Connect an Instagram account before saving this campaign."
+      );
+    }
     // A post is only required when nothing else can fire the campaign: DMs,
     // stories, lives, the default reply and refs all reach us without one.
     const hasNonPostTrigger =
@@ -656,6 +666,24 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
           </button>
         </div>
       </div>
+
+      {accountsLoaded && accounts.length === 0 && (
+        <div className="rounded border border-warning/40 bg-warning/5 p-4 text-sm">
+          <p className="font-medium text-warning">
+            No Instagram account connected
+          </p>
+          <p className="mt-1 text-muted">
+            A campaign sends from an Instagram account, so this cannot be saved
+            until one is connected. It takes about a minute.
+          </p>
+          <a
+            href="/api/instagram/connect"
+            className="mt-3 inline-block rounded bg-accent px-3 py-2 text-sm font-medium text-on-accent hover:bg-accent-hover"
+          >
+            Connect Instagram
+          </a>
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-[300px_1fr] lg:gap-8">
       {/* Left: controls */}
