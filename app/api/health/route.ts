@@ -2,61 +2,123 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
 import { getDMQueue, getRedisConnection } from "@/lib/queue/client";
 import { getWorkerHealth } from "@/lib/ops/worker-health";
+import { isCronRequest } from "@/lib/security/cron-auth";
 
 export const runtime = "nodejs";
 // Health must reflect live state (worker heartbeat, queue depth), never a
 // cached response, or it reports stale worker start times.
 export const dynamic = "force-dynamic";
 
+/**
+ * Two audiences, two answers.
+ *
+ * Anyone may ask whether the app is up: that is what an uptime monitor and a
+ * load balancer need, and gating it would break them. What they get back is
+ * ok or error per subsystem and nothing else.
+ *
+ * The detail is a different thing. It used to be public, and it carried the
+ * raw driver messages, which on a connection failure name the database host,
+ * port and database name, or the internal Redis host, or say "password
+ * authentication failed for user". It also returned fleet-wide BullMQ job
+ * counts across every tenant, the exact leak /api/admin/diagnostics was fixed
+ * for, and the worker's pid and container hostname. So an anonymous caller
+ * could poll this during an incident and map the internal topology and read
+ * total platform volume. Detail now requires the cron bearer.
+ *
+ * Every probe is also bounded. Production logs show 680 ECONNREFUSED and seven
+ * 300 second function timeouts on this route, because ioredis is configured
+ * with maxRetriesPerRequest null and retries forever. A health check that
+ * hangs for five minutes is worse than one that reports a failure.
+ */
+const PROBE_TIMEOUT_MS = 3_000;
+
 type CheckStatus = "ok" | "error";
 
 interface HealthCheck {
   status: CheckStatus;
+  /** Never sent to an unauthenticated caller. */
   detail?: string;
 }
 
-async function checkDatabase(): Promise<HealthCheck> {
+/** Resolves to a timeout result rather than hanging on an unreachable service. */
+async function withTimeout<T>(
+  work: () => Promise<T>,
+  onTimeout: () => T
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await prisma.$queryRaw`SELECT 1`;
-    return { status: "ok" };
-  } catch (error) {
-    return {
-      status: "error",
-      detail: error instanceof Error ? error.message : "Database check failed",
-    };
+    return await Promise.race([
+      work(),
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(onTimeout()), PROBE_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
+}
+
+function failed(error: unknown, fallback: string): HealthCheck {
+  return {
+    status: "error",
+    detail: error instanceof Error ? error.message : fallback,
+  };
+}
+
+async function checkDatabase(): Promise<HealthCheck> {
+  return withTimeout(
+    async () => {
+      try {
+        await prisma.$queryRaw`SELECT 1`;
+        return { status: "ok" as const };
+      } catch (error) {
+        return failed(error, "Database check failed");
+      }
+    },
+    () => ({ status: "error", detail: "Database check timed out" })
+  );
 }
 
 async function checkRedis(): Promise<HealthCheck> {
-  try {
-    const pong = await getRedisConnection().ping();
-    return { status: pong === "PONG" ? "ok" : "error", detail: pong };
-  } catch (error) {
-    return {
-      status: "error",
-      detail: error instanceof Error ? error.message : "Redis check failed",
-    };
-  }
+  return withTimeout(
+    async () => {
+      try {
+        const pong = await getRedisConnection().ping();
+        return pong === "PONG"
+          ? { status: "ok" as const }
+          : { status: "error" as const, detail: `Unexpected reply: ${pong}` };
+      } catch (error) {
+        return failed(error, "Redis check failed");
+      }
+    },
+    () => ({ status: "error", detail: "Redis check timed out" })
+  );
 }
 
-async function checkQueue(): Promise<HealthCheck & { counts?: unknown }> {
-  try {
-    const counts = await getDMQueue().getJobCounts(
-      "waiting",
-      "active",
-      "delayed",
-      "failed"
-    );
-    return { status: "ok", counts };
-  } catch (error) {
-    return {
-      status: "error",
-      detail: error instanceof Error ? error.message : "Queue check failed",
-    };
-  }
+async function checkQueue(): Promise<
+  HealthCheck & { counts?: Record<string, number> }
+> {
+  return withTimeout(
+    async () => {
+      try {
+        const counts = await getDMQueue().getJobCounts(
+          "waiting",
+          "active",
+          "delayed",
+          "failed"
+        );
+        return { status: "ok" as const, counts };
+      } catch (error) {
+        return failed(error, "Queue check failed");
+      }
+    },
+    () => ({ status: "error" as const, detail: "Queue check timed out" })
+  );
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const detailed = isCronRequest(request);
+
   const [database, redis, queue, worker] = await Promise.all([
     checkDatabase(),
     checkRedis(),
@@ -75,16 +137,22 @@ export async function GET() {
     queue.status === "ok" &&
     worker.healthy;
 
-  return NextResponse.json(
-    {
-      status: healthy ? "ok" : "degraded",
-      checks: {
-        database,
-        redis,
-        queue,
-        worker,
-      },
-    },
-    { status: healthy ? 200 : 503 }
-  );
+  const body = detailed
+    ? {
+        status: healthy ? "ok" : "degraded",
+        checks: { database, redis, queue, worker },
+      }
+    : {
+        status: healthy ? "ok" : "degraded",
+        checks: {
+          database: database.status,
+          redis: redis.status,
+          queue: queue.status,
+          // Whether the worker is alive is the one operational fact an uptime
+          // monitor genuinely needs. Its pid, hostname and start time are not.
+          worker: worker.healthy ? "ok" : "error",
+        },
+      };
+
+  return NextResponse.json(body, { status: healthy ? 200 : 503 });
 }
