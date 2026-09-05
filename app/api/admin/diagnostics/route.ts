@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
-import { getWorkerAlerts, getWorkerHealth } from "@/lib/ops/worker-health";
+import { getWorkerHealth } from "@/lib/ops/worker-health";
 import {
   canManageWorkspace,
   getCurrentWorkspaceContext,
@@ -51,7 +51,6 @@ export async function GET() {
   const [
     queueCounts,
     workerHealth,
-    workerAlerts,
     webhookFailures,
     dmFailures,
     tokenRefreshFailures,
@@ -61,8 +60,13 @@ export async function GET() {
     // here told each workspace how busy every other one is. This workspace's
     // own backlog is what the page actually needs, and DmLog is scoped.
     workspaceQueueCounts(workspaceId),
+    // getWorkerAlerts(10) used to be here. It reads one global Redis ring
+    // holding the last 25 DM worker failures across every tenant, each one
+    // carrying another workspace's instagramAccountId, commentId and Meta's
+    // raw error text. Same leak class as the queue counts above, missed when
+    // those were fixed. The scoped operationalEvents below already give this
+    // workspace its own failures, so the ring is simply not read here.
     getWorkerHealth(),
-    getWorkerAlerts(10),
     prisma.webhookEvent.findMany({
       where: { workspaceId, status: "FAILED" },
       orderBy: { createdAt: "desc" },
@@ -133,7 +137,6 @@ export async function GET() {
     data: {
       queueCounts,
       workerHealth,
-      workerAlerts,
       webhookFailures,
       dmFailures,
       tokenRefreshFailures,
