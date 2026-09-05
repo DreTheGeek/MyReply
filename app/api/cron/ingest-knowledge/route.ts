@@ -31,7 +31,7 @@ const MAX_PER_TICK = 5;
  * CRON_SECRET. There is no fallback: see lib/security/cron-auth.ts.
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  if (!isCronRequest(request)) {
+  if (!(await isCronRequest(request))) {
     return NextResponse.json(
       { success: false, error: "Unauthorized" },
       { status: 401 }

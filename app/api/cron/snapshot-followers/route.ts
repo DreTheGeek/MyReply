@@ -21,7 +21,7 @@ const MAX_ACCOUNTS_PER_RUN = Number(
  * permanently — there is no way to backfill beyond the insights window.
  */
 export async function GET(request: NextRequest) {
-  if (!isCronRequest(request)) {
+  if (!(await isCronRequest(request))) {
     return NextResponse.json(
       { success: false, error: "Unauthorized" },
       { status: 401 }

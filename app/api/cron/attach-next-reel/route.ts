@@ -19,7 +19,7 @@ function isReel(media: InstagramMedia): boolean {
 }
 
 export async function GET(request: NextRequest) {
-  if (!isCronRequest(request)) {
+  if (!(await isCronRequest(request))) {
     return NextResponse.json(
       { success: false, error: "Unauthorized" },
       { status: 401 }

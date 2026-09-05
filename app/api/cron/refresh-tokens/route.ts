@@ -16,7 +16,7 @@ const MAX_ACCOUNTS_PER_RUN = Number(
 );
 
 export async function GET(request: NextRequest) {
-  if (!isCronRequest(request)) {
+  if (!(await isCronRequest(request))) {
     return NextResponse.json(
       { success: false, error: "Unauthorized" },
       { status: 401 }

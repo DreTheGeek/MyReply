@@ -117,7 +117,9 @@ async function checkQueue(): Promise<
 }
 
 export async function GET(request: Request) {
-  const detailed = isCronRequest(request);
+  // Reads the shared secret from the vault, so the detail view and the
+  // scheduler agree about who the caller is.
+  const detailed = await isCronRequest(request);
 
   const [database, redis, queue, worker] = await Promise.all([
     checkDatabase(),

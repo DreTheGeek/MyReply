@@ -51,7 +51,7 @@ Both live in `supabase_vault` and are read at run time.
 | Vault secret name | Value |
 | --- | --- |
 | `myreply_app_url` | The deployed origin with no trailing path, for example `https://app.myreply.com`. |
-| `myreply_cron_secret` | Exactly the value of `CRON_SECRET` in the app environment. It must be its own value. Never reuse `NEXTAUTH_SECRET`: this secret travels in an Authorization header on every tick and is recorded in the pg_net response tables, so anything put here should be assumed readable by anyone with database access. Generate one with `openssl rand -hex 32`. With `CRON_SECRET` unset the routes deny every request rather than falling back. |
+| `myreply_cron_secret` | The bearer token for the cron routes, and the **single source of truth** for it. pg_cron reads this row to build the Authorization header, and the app reads the same row to check it, so the two cannot disagree. It must be its own value: never reuse `NEXTAUTH_SECRET`, because this travels in a header on every tick and is recorded in the pg_net response tables, so treat anything here as readable by anyone with database access. Generate one with `openssl rand -hex 32`. |
 
 Create them once, on a session connection (`DIRECT_URL`, port 5432), in the
 Supabase SQL editor or psql. Never in a migration, and never in a file that
@@ -67,7 +67,7 @@ select vault.create_secret(
 select vault.create_secret(
   'the-real-cron-secret',
   'myreply_cron_secret',
-  'Bearer token for MyReply cron routes. Mirrors CRON_SECRET in the app env.'
+  'Bearer token for MyReply cron routes. The source of truth: both pg_cron and the app read this row.'
 );
 ```
 
@@ -78,11 +78,10 @@ fails loudly.
 
 ## Rotating the secret
 
-Rotation is an `UPDATE`, not a migration or a redeploy of the job definitions.
-Order matters, because the app compares what it receives against its own env:
+Rotation is an `UPDATE`, and nothing else. There is no second copy to keep in
+step and no redeploy: both the schedule and the app read this one row.
 
-1. Set the new `CRON_SECRET` in the Vercel project environment and redeploy.
-2. Update the vault secret to match:
+1. Update the vault secret:
 
    ```sql
    select vault.update_secret(
@@ -90,6 +89,10 @@ Order matters, because the app compares what it receives against its own env:
      'the-new-cron-secret'
    );
    ```
+
+2. Wait up to five minutes for the app's cached copy to expire. The cache
+   exists so an unauthenticated flood cannot make the app do a database read
+   before it can say no; see `lib/security/cron-auth.ts`.
 
 3. Wait for the next `myreply_ingest_knowledge` tick, at most 15 minutes, then
    run `scripts/cron-status.mjs`. A stale secret shows as
