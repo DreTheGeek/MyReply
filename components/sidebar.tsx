@@ -162,14 +162,37 @@ export default function Sidebar({
             </a>
           </div>
 
-          <div className="flex items-center justify-between px-1">
+          {/* Terms, Privacy and Data Deletion were linked from the marketing
+              home page footer and nowhere else, so nobody signed in could
+              reach them, and Meta App Review expects the deletion page to be
+              reachable. */}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1">
             <Link
-              href="/settings"
+              href="/terms"
               onClick={onClose}
               className="text-[11px] text-muted hover:text-foreground"
             >
-              What is new
+              Terms
             </Link>
+            <span className="text-[11px] text-zinc-600">·</span>
+            <Link
+              href="/privacy"
+              onClick={onClose}
+              className="text-[11px] text-muted hover:text-foreground"
+            >
+              Privacy
+            </Link>
+            <span className="text-[11px] text-zinc-600">·</span>
+            <Link
+              href="/data-deletion"
+              onClick={onClose}
+              className="text-[11px] text-muted hover:text-foreground"
+            >
+              Delete my data
+            </Link>
+          </div>
+
+          <div className="flex items-center justify-end px-1">
             <form action={signOutAction}>
               <button
                 type="submit"
