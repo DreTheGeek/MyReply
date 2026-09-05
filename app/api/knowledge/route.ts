@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { z } from "zod";
+import { checkPlanFeature } from "@/lib/plan-gate";
 import { prisma } from "@/lib/db/client";
 import {
   MAX_CRAWL_DEPTH,
@@ -147,6 +148,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       { status: 403 }
     );
   }
+
+  // The knowledge base is a paid feature and was reachable on every plan.
+  const planGate = await checkPlanFeature(context.workspaceId, "knowledge_base");
+  if (planGate) return planGate;
 
   const contentType = request.headers.get("content-type") ?? "";
 
@@ -339,6 +344,10 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
       { status: 403 }
     );
   }
+
+  // The knowledge base is a paid feature and was reachable on every plan.
+  const planGate = await checkPlanFeature(context.workspaceId, "knowledge_base");
+  if (planGate) return planGate;
 
   const fromQuery = request.nextUrl.searchParams.get("id");
   const body: unknown = fromQuery

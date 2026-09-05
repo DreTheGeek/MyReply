@@ -1,4 +1,5 @@
 import { NextResponse, after } from "next/server";
+import { checkPlanFeature } from "@/lib/plan-gate";
 import { prisma } from "@/lib/db/client";
 import { runWebsiteIngest } from "@/lib/knowledge/ingest";
 import {
@@ -41,6 +42,10 @@ export async function POST(
       { status: 403 }
     );
   }
+
+  // Re-ingesting is the same paid feature as adding a source.
+  const planGate = await checkPlanFeature(context.workspaceId, "knowledge_base");
+  if (planGate) return planGate;
 
   const { id } = await params;
 

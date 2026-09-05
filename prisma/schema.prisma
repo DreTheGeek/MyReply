@@ -135,6 +135,9 @@ model Workspace {
   contacts          Contact[]
   tags              Tag[]
   knowledgeSources  KnowledgeSource[]
+  flows             Flow[]
+  flowRuns          FlowRun[]
+  conversions       Conversion[]
   assistantAnswers  AssistantAnswer[]
   outboundMessages  OutboundMessage[]
   aiCredential      WorkspaceAiCredential?
@@ -179,7 +182,10 @@ model Contact {
   instagramAccount InstagramAccount  @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
   tags             ContactTag[]
   dmLogs           DmLog[]
+  linkClicks       LinkClick[]
   assistantAnswers AssistantAnswer[]
+  flowRuns         FlowRun[]
+  conversions      Conversion[]
   outboundMessages OutboundMessage[]
 
   @@unique([instagramAccountId, externalId])
@@ -375,6 +381,7 @@ model Automation {
   dmLogs           DmLog[]
   trackedLinks     TrackedLink[]
   linkClicks       LinkClick[]
+  conversions      Conversion[]
 
   @@index([workspaceId])
   @@index([instagramAccountId])
@@ -503,6 +510,12 @@ model TrackedLink {
 
 model LinkClick {
   id                 String   @id @default(cuid())
+  /// Who clicked. Null on rows written before per-recipient links existed, and
+  /// on any click whose token did not resolve.
+  contactId          String?
+  /// The per-recipient token the link carried. One campaign used to hand every
+  /// recipient the same URL, so a click could never be traced to a person.
+  clickToken         String?
   workspaceId        String
   automationId       String
   instagramAccountId String
@@ -516,11 +529,15 @@ model LinkClick {
   automation       Automation       @relation(fields: [automationId], references: [id], onDelete: Cascade)
   instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
   trackedLink      TrackedLink      @relation(fields: [trackedLinkId], references: [id], onDelete: Cascade)
+  contact          Contact?         @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  conversions      Conversion[]
 
   @@index([workspaceId])
   @@index([automationId])
   @@index([instagramAccountId])
   @@index([trackedLinkId])
+  @@index([contactId])
+  @@index([clickToken])
   @@index([createdAt])
   @@index([workspaceId, createdAt])
 }
@@ -892,4 +909,142 @@ model OAuthToken {
   @@index([workspaceId])
   @@index([authorizationCodeId])
   @@index([type, expiresAt])
+}
+
+/// A multi-step automation: trigger, conditions, actions.
+///
+/// Kept as a versioned JSON graph rather than a table per node type, because
+/// the shape changes as node types are added and a run must keep executing the
+/// definition it started with. `definition` is validated against a Zod schema
+/// on write, so the looseness is at rest rather than in the code.
+model Flow {
+  id          String     @id @default(cuid())
+  workspaceId String
+  name        String
+  trigger     FlowTrigger
+  isActive    Boolean    @default(false)
+  /// The node graph. Validated on write, never trusted on read.
+  definition  Json
+  /// Bumped on every save. A run records which version it executed.
+  version     Int        @default(1)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  runs      FlowRun[]
+
+  @@index([workspaceId])
+  @@index([workspaceId, trigger, isActive])
+}
+
+/// One execution. Durable, because a flow can wait inside the 24 hour window
+/// and the worker restarting must not lose where it was.
+model FlowRun {
+  id          String        @id @default(cuid())
+  flowId      String
+  workspaceId String
+  /// Which definition version ran, so an edit mid-run cannot change the rules
+  /// under a person who is already partway through.
+  version     Int
+  contactId   String?
+  status      FlowRunStatus @default(RUNNING)
+  /// Set while a wait step is pending, so the resume cron knows when to look.
+  resumeAt    DateTime?
+  /// Where execution is, so a resume does not restart from the top.
+  cursorStepId String?
+  errorMessage String?
+  startedAt   DateTime      @default(now())
+  finishedAt  DateTime?
+
+  flow      Flow      @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  contact   Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  steps     FlowStepLog[]
+
+  @@index([workspaceId, startedAt])
+  @@index([status, resumeAt])
+  @@index([flowId])
+}
+
+/// What each step did, including what it declined to do and why. An operator
+/// cannot tell a skip from a failure on an empty screen.
+model FlowStepLog {
+  id       String         @id @default(cuid())
+  runId    String
+  stepId   String
+  kind     String
+  status   FlowStepStatus
+  /// Redacted at write time. Never store a credential here.
+  detail   Json?
+  errorMessage String?
+  at       DateTime       @default(now())
+
+  run FlowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, at])
+}
+
+/// Money, or a booking, attributed back to the DM that caused it.
+///
+/// The chain is comment, DM, click, conversion. Until this existed the chain
+/// stopped at an anonymous click, so a campaign could report 43 clicks and
+/// never who, or what happened next.
+model Conversion {
+  id          String           @id @default(cuid())
+  workspaceId String
+  automationId String?
+  contactId   String?
+  linkClickId String?
+  /// Minor units, so there is no float anywhere near money.
+  valueCents  Int              @default(0)
+  currency    String           @default("USD")
+  source      ConversionSource
+  /// The provider's own id, so a replayed webhook cannot double count.
+  externalId  String?
+  createdAt   DateTime         @default(now())
+
+  workspace  Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  automation Automation? @relation(fields: [automationId], references: [id], onDelete: SetNull)
+  contact    Contact?    @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  linkClick  LinkClick?  @relation(fields: [linkClickId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, source, externalId])
+  @@index([workspaceId, createdAt])
+  @@index([automationId])
+  @@index([contactId])
+}
+
+enum FlowTrigger {
+  COMMENT
+  DM_KEYWORD
+  STORY_REPLY
+  STORY_MENTION
+  LIVE_COMMENT
+  REFERRAL
+  QUICK_REPLY
+  REACTION
+  MENTION
+}
+
+enum FlowRunStatus {
+  RUNNING
+  WAITING
+  DONE
+  FAILED
+  /// Stopped because continuing would have broken a platform rule, most often
+  /// the 24 hour messaging window closing mid-run.
+  ABANDONED
+}
+
+enum FlowStepStatus {
+  DONE
+  SKIPPED
+  FAILED
+  WAITING
+}
+
+enum ConversionSource {
+  SQUARE
+  WEBHOOK
+  MANUAL
 }

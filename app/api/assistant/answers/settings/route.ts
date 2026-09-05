@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { checkPlanFeature } from "@/lib/plan-gate";
 import {
   answeringSettingsSchema,
   getAnsweringSettings,
@@ -60,6 +61,10 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
       { status: 403 }
     );
   }
+
+  // Answering customer DMs is a paid feature and was reachable on every plan.
+  const planGate = await checkPlanFeature(context.workspaceId, "ai_dm_answering");
+  if (planGate) return planGate;
 
   const parsed = answeringSettingsSchema.safeParse(
     await request.json().catch(() => ({}))

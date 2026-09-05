@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { checkPlanFeature } from "@/lib/plan-gate";
 import { prisma } from "@/lib/db/client";
 import {
   buildInvitationUrl,
@@ -103,6 +104,12 @@ export async function POST(request: NextRequest) {
       { status: 403 }
     );
   }
+
+  // Free covers one seat. Inviting the second is the paid feature. PATCH is
+  // deliberately not gated: changing an existing member's role consumes no
+  // new seat, so charging for it would be charging for nothing.
+  const planGate = await checkPlanFeature(context.workspaceId, "team_seats");
+  if (planGate) return planGate;
 
   const body = await request.json();
   const parsed = inviteSchema.safeParse(body);

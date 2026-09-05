@@ -61,8 +61,11 @@ export async function GET(request: NextRequest) {
     });
 
     if (!connection.allowed) {
+      // Two different refusals, two different things to do about them. Sending
+      // someone who hit the plan cap to "already connected" would tell them to
+      // go find an account nobody else has.
       return NextResponse.redirect(
-        `${baseUrl}/settings?instagram=already_connected`
+        `${baseUrl}/settings?instagram=${connection.reason}`
       );
     }
 

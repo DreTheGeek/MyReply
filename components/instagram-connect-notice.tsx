@@ -35,6 +35,12 @@ const MESSAGES: Record<string, { tone: Tone; title: string; detail: string }> = 
     detail:
       "That Instagram account is connected to another workspace. Disconnect it there first, or connect a different account.",
   },
+  plan_limit: {
+    tone: "warning",
+    title: "Free covers one account",
+    detail:
+      "Your plan connects one Instagram account, and it is already in use. Pro removes the limit rather than raising it to a number. Everything else on Free stays uncapped.",
+  },
 };
 
 export function InstagramConnectNotice() {

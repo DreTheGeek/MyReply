@@ -16,6 +16,10 @@ const { mockPrisma, mockContext, mockCanManage, mockAfter, mockIngest } =
         deleteMany: vi.fn(),
         createMany: vi.fn(),
       },
+      // Read by the plan gate. The knowledge base is a Pro feature, so these
+      // tests, which are about the route's behaviour rather than about billing,
+      // run as a Pro workspace. The refusal on Free has its own test below.
+      workspace: { findUnique: vi.fn() },
       $transaction: vi.fn(),
     },
     mockContext: vi.fn(),
@@ -138,6 +142,7 @@ beforeEach(() => {
   mockCanManage.mockImplementation(
     (role: string) => role === "OWNER" || role === "ADMIN"
   );
+  mockPrisma.workspace.findUnique.mockResolvedValue({ plan: "PRO" });
   // Default: hold the callback so a test can assert the response landed first.
   mockAfter.mockImplementation(() => undefined);
 
@@ -243,6 +248,37 @@ describe("GET /api/knowledge", () => {
     expect(payload.data.sources[0].errorMessage).toBe(
       "shop.test returned HTTP 500"
     );
+  });
+});
+
+describe("the plan gate", () => {
+  it("refuses a Free workspace with 402, not 403", async () => {
+    // 402 rather than 403 on purpose: a client needs to tell "your plan does
+    // not include this", which an upgrade fixes, from "you are not allowed",
+    // which it does not.
+    mockPrisma.workspace.findUnique.mockResolvedValue({ plan: "FREE" });
+
+    const response = await jsonPost({
+      kind: "MANUAL",
+      question: "Do you ship?",
+      answer: "Yes, within a week.",
+    });
+
+    expect(response.status).toBe(402);
+    const payload = await response.json();
+    expect(payload.feature).toBe("knowledge_base");
+    expect(payload.requiredPlan).toBe("PRO");
+    expect(mockPrisma.knowledgeSource.create).not.toHaveBeenCalled();
+  });
+
+  it("lets a Free workspace still read what it already has", async () => {
+    // Nothing is taken away by a downgrade. Sources stay readable, they just
+    // cannot be added to.
+    mockPrisma.workspace.findUnique.mockResolvedValue({ plan: "FREE" });
+    seed({ workspaceId: OWN_WORKSPACE, status: "READY" });
+
+    const response = await GET();
+    expect(response.status).toBe(200);
   });
 });
 

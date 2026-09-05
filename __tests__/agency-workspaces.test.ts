@@ -7,6 +7,8 @@ const { mockPrisma } = vi.hoisted(() => ({
       findUnique: vi.fn(),
       findFirst: vi.fn(),
     },
+    // Read to decide how many accounts this plan allows.
+    workspace: { findUnique: vi.fn() },
   },
 }));
 
@@ -57,8 +59,56 @@ describe("agency workspace helpers", () => {
     });
   });
 
-  it("allows connecting additional accounts with no plan limit", async () => {
+  it("allows the first account on any plan", async () => {
     mockPrisma.instagramAccount.findUnique.mockResolvedValue(null);
+    mockPrisma.workspace.findUnique.mockResolvedValue({ plan: "FREE" });
+    mockPrisma.instagramAccount.count.mockResolvedValue(0);
+
+    await expect(
+      canConnectInstagramAccount({
+        workspaceId: "workspace_123",
+        instagramId: "ig_123",
+      })
+    ).resolves.toMatchObject({ allowed: true, reason: null });
+  });
+
+  it("refuses a second account on Free, the one capped resource", async () => {
+    mockPrisma.instagramAccount.findUnique.mockResolvedValue(null);
+    mockPrisma.workspace.findUnique.mockResolvedValue({ plan: "FREE" });
+    mockPrisma.instagramAccount.count.mockResolvedValue(1);
+
+    await expect(
+      canConnectInstagramAccount({
+        workspaceId: "workspace_123",
+        instagramId: "ig_123",
+      })
+    ).resolves.toMatchObject({ allowed: false, reason: "plan_limit" });
+  });
+
+  it("allows a second account on Pro", async () => {
+    mockPrisma.instagramAccount.findUnique.mockResolvedValue(null);
+    mockPrisma.workspace.findUnique.mockResolvedValue({ plan: "PRO" });
+    mockPrisma.instagramAccount.count.mockResolvedValue(7);
+
+    await expect(
+      canConnectInstagramAccount({
+        workspaceId: "workspace_123",
+        instagramId: "ig_123",
+      })
+    ).resolves.toMatchObject({ allowed: true, reason: null });
+    // Unlimited means the count is never even asked for a comparison it
+    // cannot fail, so a Pro workspace pays no query for a cap it does not have.
+    expect(mockPrisma.instagramAccount.count).not.toHaveBeenCalled();
+  });
+
+  it("never refuses a reconnect of an account this workspace already holds", async () => {
+    // The callback upserts on instagramId, so refreshing an expired token must
+    // not be read as connecting a new account and refused for hitting the cap.
+    mockPrisma.instagramAccount.findUnique.mockResolvedValue({
+      workspaceId: "workspace_123",
+    });
+    mockPrisma.workspace.findUnique.mockResolvedValue({ plan: "FREE" });
+    mockPrisma.instagramAccount.count.mockResolvedValue(1);
 
     await expect(
       canConnectInstagramAccount({
