@@ -64,13 +64,24 @@ async function getMemberPayload(
     }),
   ]);
 
+  // GET had no role gate, unlike POST, so every MEMBER could read the live
+  // invite URL for every pending invitation. It is not directly redeemable,
+  // because the accept route re-checks that the session email matches the
+  // invited one, but a low privilege member could still exfiltrate them.
+  // No role resolved means no elevated view. Defaulting closed here matters:
+  // this decides whether a live invite URL goes on the wire.
+  const canSeeTokens = currentUserRole
+    ? canManageWorkspace(currentUserRole)
+    : false;
+
   return {
     ...(currentUserRole ? { currentUserRole } : {}),
     members,
-    invitations: invitations.map((invitation) => ({
-      ...invitation,
-      inviteUrl: buildInvitationUrl(invitation.token),
-    })),
+    invitations: invitations.map(({ token, ...invitation }) =>
+      canSeeTokens
+        ? { ...invitation, token, inviteUrl: buildInvitationUrl(token) }
+        : invitation
+    ),
   };
 }
 
@@ -157,14 +168,20 @@ export async function POST(request: NextRequest) {
         email,
         role: parsed.data.role,
         token: generateInvitationToken(),
-        invitedByUserId: context.userId,
+        // Empty for an API key caller, which is not a valid User id: writing
+        // it raw made an ADMIN key's invite fail on the foreign key with a 500.
+        // Two sibling routes already write this defensively.
+        invitedByUserId: context.userId || null,
         expiresAt: getInvitationExpiry(),
       },
       update: {
         role: parsed.data.role,
         status: "PENDING",
         token: generateInvitationToken(),
-        invitedByUserId: context.userId,
+        // Empty for an API key caller, which is not a valid User id: writing
+        // it raw made an ADMIN key's invite fail on the foreign key with a 500.
+        // Two sibling routes already write this defensively.
+        invitedByUserId: context.userId || null,
         expiresAt: getInvitationExpiry(),
       },
     });
