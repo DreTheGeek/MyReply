@@ -1,7 +1,26 @@
+import { validateCoreEnv } from "@/lib/env";
 import { createDMWorker } from "@/lib/queue/dm-worker";
 import { recordWorkerHeartbeat } from "@/lib/ops/worker-health";
 import { reconcileComments } from "@/lib/polling/comment-reconciler";
 import os from "node:os";
+
+// lib/env.ts has had a complete Zod schema for the nine required server
+// variables since it was written, and nothing ever called it. A missing key
+// surfaced as a throw deep inside a job instead of a refusal to start.
+//
+// The worker is the right place to enforce it: it is a long lived process with
+// a real boot, unlike the serverless handlers, and every send in the product
+// goes through it. Failing here is loud, immediate, and restarts cleanly once
+// the variable is set.
+try {
+  validateCoreEnv();
+} catch (error) {
+  console.error(
+    "[DM Worker] Refusing to start: the environment is incomplete.",
+    error instanceof Error ? error.message : error
+  );
+  process.exit(1);
+}
 
 const worker = createDMWorker();
 const startedAt = new Date().toISOString();

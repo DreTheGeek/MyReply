@@ -11,7 +11,22 @@ let connection: Redis | null = null;
 
 export function getRedisConnection(): Redis {
   if (!connection) {
-    connection = new Redis(process.env.REDIS_URL!, {
+    // The non-null assertion here used to be a lie. With REDIS_URL unset,
+    // ioredis falls back to 127.0.0.1:6379, and maxRetriesPerRequest null means
+    // it retries that forever. Production logs carry 680 ECONNREFUSED and seven
+    // 300 second function timeouts from exactly this: a missing variable
+    // presenting as a hang rather than as a missing variable.
+    //
+    // Thrown lazily rather than at module load, so importing this file during
+    // a build without a Redis URL still works.
+    const url = process.env.REDIS_URL;
+    if (!url) {
+      throw new Error(
+        "REDIS_URL is required. Without it ioredis silently targets localhost and retries forever, which presents as a hang rather than a configuration error."
+      );
+    }
+
+    connection = new Redis(url, {
       maxRetriesPerRequest: null, // Required by BullMQ
     });
   }
