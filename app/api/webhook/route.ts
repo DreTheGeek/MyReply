@@ -43,6 +43,17 @@ interface ResolvedAccount {
   workspaceId: string;
 }
 
+/**
+ * How a handler looks up the account an event belongs to.
+ *
+ * Taken as a parameter rather than called directly, because these handlers run
+ * once per event inside a Meta batch and the answer is the same row every
+ * time. The POST handler passes a per-request cache.
+ */
+type AccountResolver = (
+  instagramId: string
+) => Promise<ResolvedAccount | null>;
+
 async function resolveAccount(
   instagramId: string
 ): Promise<ResolvedAccount | null> {
@@ -71,9 +82,10 @@ async function resolveAccount(
  * match on that id and the window can go away.
  */
 async function recordOutboundEcho(
-  event: WebhookMessageEchoEvent
+  event: WebhookMessageEchoEvent,
+  resolve: AccountResolver = resolveAccount
 ): Promise<string | null> {
-  const account = await resolveAccount(event.instagramAccountId);
+  const account = await resolve(event.instagramAccountId);
   if (!account) return null;
 
   // Already recorded. Meta redelivers webhooks, and re-running the counters
@@ -146,9 +158,10 @@ async function recordOutboundEcho(
  * every segment built on this counter wrong.
  */
 async function recordReaction(
-  event: WebhookReactionEvent
+  event: WebhookReactionEvent,
+  resolve: AccountResolver = resolveAccount
 ): Promise<string | null> {
-  const account = await resolveAccount(event.instagramAccountId);
+  const account = await resolve(event.instagramAccountId);
   if (!account) return null;
 
   const contact = await upsertContact({
@@ -172,9 +185,10 @@ async function recordReaction(
  * named the author, which many mention payloads do not.
  */
 async function recordMention(
-  event: WebhookMentionEvent
+  event: WebhookMentionEvent,
+  resolve: AccountResolver = resolveAccount
 ): Promise<string | null> {
-  const account = await resolveAccount(event.instagramAccountId);
+  const account = await resolve(event.instagramAccountId);
 
   if (account && event.mentionerId) {
     await upsertContact({
@@ -292,6 +306,37 @@ export async function POST(request: NextRequest) {
     },
   });
 
+  // Meta batches events, and the loops below are bounded by that batch rather
+  // than by anything in this file. Two things were therefore repeated once per
+  // event: the account lookup, which is the same row every time for a given
+  // sender, and the workspaceId backfill, which rewrote this one webhook row
+  // with the same value over and over.
+  const accountCache = new Map<string, ResolvedAccount | null>();
+
+  async function resolveAccountCached(
+    instagramId: string
+  ): Promise<ResolvedAccount | null> {
+    const cached = accountCache.get(instagramId);
+    if (cached !== undefined) return cached;
+    const account = await resolveAccount(instagramId);
+    accountCache.set(instagramId, account);
+    return account;
+  }
+
+  // The row starts with no workspace because the tenant is not known until an
+  // event has been parsed. Once one is, every later event in the same batch
+  // resolves to the same one, so this writes at most once.
+  let backfilledWorkspaceId: string | null = null;
+
+  async function backfillWorkspace(workspaceId: string): Promise<void> {
+    if (backfilledWorkspaceId === workspaceId) return;
+    backfilledWorkspaceId = workspaceId;
+    await prisma.webhookEvent.update({
+      where: { id: webhookEvent.id },
+      data: { workspaceId },
+    });
+  }
+
   try {
     const commentEvents = parseCommentEvents(
       payload as Parameters<typeof parseCommentEvents>[0]
@@ -299,10 +344,7 @@ export async function POST(request: NextRequest) {
     const queue = getDMQueue();
 
     for (const event of commentEvents) {
-      const account = await prisma.instagramAccount.findUnique({
-        where: { instagramId: event.instagramAccountId },
-        select: { workspaceId: true },
-      });
+      const account = await resolveAccountCached(event.instagramAccountId);
 
       await queue.add(
         "process-comment",
@@ -321,10 +363,7 @@ export async function POST(request: NextRequest) {
       );
 
       if (account) {
-        await prisma.webhookEvent.update({
-          where: { id: webhookEvent.id },
-          data: { workspaceId: account.workspaceId },
-        });
+        await backfillWorkspace(account.workspaceId);
       }
     }
 
@@ -415,10 +454,7 @@ export async function POST(request: NextRequest) {
     );
 
     for (const event of messageEvents) {
-      const account = await prisma.instagramAccount.findUnique({
-        where: { instagramId: event.instagramAccountId },
-        select: { workspaceId: true },
-      });
+      const account = await resolveAccountCached(event.instagramAccountId);
 
       await queue.add(
         MESSAGE_JOB_NAME,
@@ -442,10 +478,7 @@ export async function POST(request: NextRequest) {
       );
 
       if (account) {
-        await prisma.webhookEvent.update({
-          where: { id: webhookEvent.id },
-          data: { workspaceId: account.workspaceId },
-        });
+        await backfillWorkspace(account.workspaceId);
       }
     }
 
@@ -476,6 +509,9 @@ export async function POST(request: NextRequest) {
             },
           },
         },
+        // A contact who has been messaged by many campaigns would otherwise
+        // pull every one of those rows on a single read receipt.
+        take: 50,
       });
 
       const scheduledAutomationIds = new Set<string>();
@@ -516,12 +552,9 @@ export async function POST(request: NextRequest) {
     );
 
     for (const event of messageEditEvents) {
-      const account = await resolveAccount(event.instagramAccountId);
+      const account = await resolveAccountCached(event.instagramAccountId);
       if (account) {
-        await prisma.webhookEvent.update({
-          where: { id: webhookEvent.id },
-          data: { workspaceId: account.workspaceId },
-        });
+        await backfillWorkspace(account.workspaceId);
       }
 
       // Editing a message must never earn a second DM. The worker's own
@@ -567,12 +600,9 @@ export async function POST(request: NextRequest) {
     );
 
     for (const event of echoEvents) {
-      const workspaceId = await recordOutboundEcho(event);
+      const workspaceId = await recordOutboundEcho(event, resolveAccountCached);
       if (workspaceId) {
-        await prisma.webhookEvent.update({
-          where: { id: webhookEvent.id },
-          data: { workspaceId },
-        });
+        await backfillWorkspace(workspaceId);
       }
     }
 
@@ -586,12 +616,9 @@ export async function POST(request: NextRequest) {
     for (const event of reactionEvents) {
       if (event.action !== "react") continue;
 
-      const workspaceId = await recordReaction(event);
+      const workspaceId = await recordReaction(event, resolveAccountCached);
       if (workspaceId) {
-        await prisma.webhookEvent.update({
-          where: { id: webhookEvent.id },
-          data: { workspaceId },
-        });
+        await backfillWorkspace(workspaceId);
       }
     }
 
@@ -603,12 +630,9 @@ export async function POST(request: NextRequest) {
     );
 
     for (const event of mentionEvents) {
-      const workspaceId = await recordMention(event);
+      const workspaceId = await recordMention(event, resolveAccountCached);
       if (workspaceId) {
-        await prisma.webhookEvent.update({
-          where: { id: webhookEvent.id },
-          data: { workspaceId },
-        });
+        await backfillWorkspace(workspaceId);
       }
     }
 
