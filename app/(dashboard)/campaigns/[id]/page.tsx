@@ -11,6 +11,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { describeTrigger } from "@/lib/campaigns/describe-trigger";
 import CampaignPreview, { type PreviewTab } from "@/components/campaign-preview";
 
 interface Campaign {
@@ -23,6 +24,11 @@ interface Campaign {
   keywords: string[];
   matchAnyWord: boolean;
   dmTriggerEnabled: boolean;
+  storyReplyEnabled: boolean;
+  storyMentionEnabled: boolean;
+  liveCommentEnabled: boolean;
+  defaultReplyEnabled: boolean;
+  referralRef: string | null;
   dmMessage: string;
   openingDmEnabled: boolean;
   openingDmMessage: string | null;
@@ -151,13 +157,15 @@ export default function CampaignDetailPage() {
   const hasLink = Boolean(campaign.trackedLinks?.[0]?.destinationUrl);
   const hasSecondLink = Boolean(campaign.trackedLinks?.[1]?.destinationUrl);
 
-  const trigger = campaign.matchAnyPost
-    ? "Any post or reel"
-    : campaign.pendingNextReel
-      ? "Your next reel"
-      : "A specific post or reel";
+  // A campaign can fire on several inbound surfaces, and this page used to
+  // describe every one of them as a comment on a post. A referral campaign with
+  // no post attached therefore read as "when someone comments on a specific
+  // post or reel" while pointing at no post, which is both wrong and unfixable
+  // by the person reading it.
+  const triggerSummary = describeTrigger(campaign);
+
   const matchText = campaign.matchAnyWord
-    ? "Any comment"
+    ? triggerSummary.anyLabel
     : campaign.keywords.join(", ") || "No keywords";
 
   const metrics = [
@@ -192,22 +200,33 @@ export default function CampaignDetailPage() {
           </span>
         </div>
 
-        <Summary title="When someone comments on">
+        <Summary title={triggerSummary.heading}>
           <div className="flex items-center gap-3">
-            {postThumb ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={postThumb}
-                alt="Post"
-                className="h-14 w-14 rounded object-cover"
-              />
-            ) : (
-              <div className="grid h-14 w-14 place-items-center rounded bg-surface-hover text-[10px] text-muted">
-                {campaign.matchAnyPost || campaign.pendingNextReel ? "Any" : "Post"}
-              </div>
-            )}
-            <span className="text-sm text-foreground">{trigger}</span>
+            {triggerSummary.showsPost ? (
+              postThumb ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={postThumb}
+                  alt="Post"
+                  className="h-14 w-14 rounded object-cover"
+                />
+              ) : (
+                <div className="grid h-14 w-14 place-items-center rounded bg-surface-hover text-[10px] text-muted">
+                  {campaign.matchAnyPost || campaign.pendingNextReel
+                    ? "Any"
+                    : "None"}
+                </div>
+              )
+            ) : null}
+            <span className="text-sm text-foreground">
+              {triggerSummary.what}
+            </span>
           </div>
+          {triggerSummary.warning && (
+            <p className="rounded border border-warning/40 bg-warning/5 px-3 py-2 text-xs text-warning">
+              {triggerSummary.warning}
+            </p>
+          )}
         </Summary>
 
         <Summary title="And this comment has">

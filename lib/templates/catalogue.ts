@@ -386,7 +386,10 @@ export const TEMPLATE_CATALOGUE: readonly CampaignTemplateDefinition[] = [
 
   defineTemplate({
     slug: "new-follower-welcome",
-    name: "New follower welcome",
+    // Named for the door it actually sits behind. It used to be called
+    // "New follower welcome", which promised a follow trigger Instagram does
+    // not expose, so it read as broken to anyone who opened it.
+    name: "Welcome people who open a chat from your link",
     description:
       "The first thing someone sees when they open a chat with you from your profile link, QR code or ice breaker.",
     audience: "Accounts sending people to their profile from a bio link, a card or an ad.",
