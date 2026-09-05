@@ -17,6 +17,22 @@ import {
 // immediately), so never cache it at the route or CDN layer.
 export const dynamic = "force-dynamic";
 
+/**
+ * A destination we are willing to send a customer to.
+ *
+ * z.string().url() accepts any scheme, so "javascript:alert(1)",
+ * "data:text/html,x" and "file:///etc/passwd" all passed and were stored as
+ * tracked destinations. A Location header will not execute those, so this was
+ * never code execution, but app/api/automations/import already validated
+ * ^https?:// on the same field and the two paths disagreed.
+ */
+const httpUrl = z
+  .string()
+  .url()
+  .refine((value) => /^https?:\/\//i.test(value), {
+    message: "Only http and https links can be sent to a customer",
+  });
+
 const createAutomationSchema = z
   .object({
     name: z.string().min(1).max(100),
@@ -57,13 +73,11 @@ const createAutomationSchema = z
       .optional()
       .default([]),
     // Empty string means "no tracked link"; a URL sets one.
-    trackedDestinationUrl: z
-      .union([z.string().url(), z.literal("")])
+    trackedDestinationUrl: z.union([httpUrl, z.literal("")])
       .optional()
       .nullable(),
     // Optional second tracked link, rendered as a second DM button.
-    secondaryDestinationUrl: z
-      .union([z.string().url(), z.literal("")])
+    secondaryDestinationUrl: z.union([httpUrl, z.literal("")])
       .optional()
       .nullable(),
     secondaryButtonLabel: z.string().max(20).optional().nullable(),
@@ -137,13 +151,11 @@ const updateAutomationSchema = z.object({
   reportShareEnabled: z.boolean().optional(),
   // Empty string clears the tracked link; a URL updates/creates it; undefined
   // leaves it unchanged.
-  trackedDestinationUrl: z
-    .union([z.string().url(), z.literal("")])
+  trackedDestinationUrl: z.union([httpUrl, z.literal("")])
     .optional()
     .nullable(),
   // Same semantics for the optional second tracked link / DM button.
-  secondaryDestinationUrl: z
-    .union([z.string().url(), z.literal("")])
+  secondaryDestinationUrl: z.union([httpUrl, z.literal("")])
     .optional()
     .nullable(),
   secondaryButtonLabel: z.string().max(20).optional().nullable(),
