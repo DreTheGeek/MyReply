@@ -92,9 +92,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const plan = parsed.data.plan;
 
-  // The seam. A paid plan will need a verified subscription before this write,
-  // and a downgrade will need the subscription cancelled after it. Both belong
-  // here, in one place, rather than spread across the routes that read plan.
+  // Upgrading is not something a workspace may do to itself. Until Square is
+  // wired, this route can only downgrade, because a self-serve upgrade here is
+  // the entire paid tier given away to anyone who can send one fetch. The
+  // upgrade path arrives with the payment webhook, which is the only caller
+  // that will have proof a subscription exists.
+  if (plan === "PRO") {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          "Upgrades happen through checkout, not this endpoint. Start one from Settings.",
+      },
+      { status: 402 }
+    );
+  }
+
+  // The seam. The payment webhook writes PRO here once a subscription is
+  // verified; this route handles the downgrade half.
   const workspace = await prisma.workspace.update({
     where: { id: context.workspaceId },
     data: { plan },

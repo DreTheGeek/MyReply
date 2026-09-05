@@ -16,8 +16,10 @@ import { decryptToken, encryptToken } from "@/lib/meta/oauth";
 import {
   type AiProviderId,
   getProviderSpec,
+  isAiProviderId,
   maskProviderKey,
 } from "@/lib/ai/providers";
+import { planHasFeature } from "@/lib/plans";
 
 /** Safe to serialise. Contains no part of the key beyond the masked hint. */
 export interface WorkspaceAiKeyStatus {
@@ -72,8 +74,33 @@ export async function getWorkspaceAiKeyStatus(
 }
 
 /**
- * Decrypt the workspace's key for one model call. Returns null when the
- * workspace has not configured one, which the assistant turns into a structured
+ * The platform's own key, used only for PRO workspaces that have not brought
+ * their own. Absent in a self-hosted deployment, which is why every caller
+ * still has to handle null.
+ */
+function managedCredential(): WorkspaceAiCredential | null {
+  const apiKey = process.env.MANAGED_AI_API_KEY;
+  if (!apiKey) return null;
+
+  const named = process.env.MANAGED_AI_PROVIDER;
+  const provider: AiProviderId = isAiProviderId(named) ? named : "ANTHROPIC";
+  return {
+    provider,
+    model: process.env.MANAGED_AI_MODEL ?? getProviderSpec(provider).defaultModel,
+    apiKey,
+  };
+}
+
+/**
+ * Decrypt the credential to use for one model call.
+ *
+ * The workspace's own key always wins: someone who has pasted a key expects
+ * their key to be the one billed, and silently spending ours instead would be
+ * both surprising and expensive. Only when there is no BYOK row does a PRO
+ * workspace fall through to the managed key, which is the entire difference
+ * between the free tier and the paid one for AI.
+ *
+ * Returns null when neither exists, which the assistant turns into a structured
  * refusal rather than an error.
  */
 export async function getWorkspaceAiCredential(
@@ -84,13 +111,22 @@ export async function getWorkspaceAiCredential(
     select: { provider: true, model: true, encryptedKey: true },
   });
 
-  if (!record) return null;
+  if (record) {
+    return {
+      provider: record.provider,
+      model: record.model,
+      apiKey: decryptToken(record.encryptedKey),
+    };
+  }
 
-  return {
-    provider: record.provider,
-    model: record.model,
-    apiKey: decryptToken(record.encryptedKey),
-  };
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { plan: true },
+  });
+
+  if (!workspace || !planHasFeature(workspace.plan, "managed_ai")) return null;
+
+  return managedCredential();
 }
 
 export interface SaveWorkspaceAiKeyInput {

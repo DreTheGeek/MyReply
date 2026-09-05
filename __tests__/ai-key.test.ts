@@ -9,6 +9,9 @@ const { mockPrisma, mockContext, mockCanManage, mockValidate } = vi.hoisted(
         deleteMany: vi.fn(),
         updateMany: vi.fn(),
       },
+      // Consulted only when there is no BYOK row, to decide whether the
+      // workspace's plan entitles it to the managed key.
+      workspace: { findUnique: vi.fn() },
     },
     mockContext: vi.fn(),
     mockCanManage: vi.fn(),
@@ -235,10 +238,45 @@ describe("workspace key storage", () => {
   });
 
   it("reports an unconfigured workspace rather than throwing", async () => {
+    mockPrisma.workspace.findUnique.mockResolvedValue({ plan: "FREE" });
+
     const status = await getWorkspaceAiKeyStatus(WORKSPACE);
     expect(status.configured).toBe(false);
     expect(status.keyHint).toBeNull();
     expect(await getWorkspaceAiCredential(WORKSPACE)).toBeNull();
+  });
+
+  it("falls back to the managed key on PRO, and never on FREE", async () => {
+    process.env.MANAGED_AI_API_KEY = "test-managed-key-not-real";
+    mockPrisma.workspaceAiCredential.findUnique.mockResolvedValue(null);
+
+    mockPrisma.workspace.findUnique.mockResolvedValue({ plan: "FREE" });
+    expect(await getWorkspaceAiCredential(WORKSPACE)).toBeNull();
+
+    mockPrisma.workspace.findUnique.mockResolvedValue({ plan: "PRO" });
+    const managed = await getWorkspaceAiCredential(WORKSPACE);
+    expect(managed?.apiKey).toBe("test-managed-key-not-real");
+
+    delete process.env.MANAGED_AI_API_KEY;
+  });
+
+  it("prefers the workspace's own key over the managed one", async () => {
+    // Someone who pasted a key expects that key to be the one billed. Quietly
+    // spending ours instead would be both surprising and expensive.
+    process.env.MANAGED_AI_API_KEY = "test-managed-key-not-real";
+    const { encryptToken } = await import("../lib/meta/oauth");
+    mockPrisma.workspaceAiCredential.findUnique.mockResolvedValue({
+      provider: "ANTHROPIC",
+      model: "claude-opus-5",
+      encryptedKey: encryptToken("their-own-key-not-real"),
+    });
+    mockPrisma.workspace.findUnique.mockResolvedValue({ plan: "PRO" });
+
+    const credential = await getWorkspaceAiCredential(WORKSPACE);
+    expect(credential?.apiKey).toBe("their-own-key-not-real");
+    expect(mockPrisma.workspace.findUnique).not.toHaveBeenCalled();
+
+    delete process.env.MANAGED_AI_API_KEY;
   });
 
   it("round-trips the key for a model call and scopes the read by workspace", async () => {

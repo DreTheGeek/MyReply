@@ -336,18 +336,29 @@ describe("GET /api/workspace/plan", () => {
 });
 
 describe("POST /api/workspace/plan is owner only", () => {
-  it("lets an owner change the plan", async () => {
-    const response = await post({ plan: "PRO" });
+  it("lets an owner downgrade", async () => {
+    const response = await post({ plan: "FREE" });
     const payload = await response.json();
 
     expect(response.status).toBe(200);
     expect(mockPrisma.workspace.update).toHaveBeenCalledWith({
       where: { id: "workspace_1" },
-      data: { plan: "PRO" },
+      data: { plan: "FREE" },
       select: { id: true, plan: true },
     });
-    expect(payload.data.plan).toBe("PRO");
-    expect(payload.data.features).toContain("managed_ai");
+    expect(payload.data.plan).toBe("FREE");
+  });
+
+  it("refuses a self-serve upgrade, which would give the paid tier away", async () => {
+    // An owner could previously send one fetch and hold every Pro feature. The
+    // upgrade path belongs to the payment webhook, which is the only caller
+    // with proof a subscription exists.
+    const response = await post({ plan: "PRO" });
+    const payload = await response.json();
+
+    expect(response.status).toBe(402);
+    expect(payload.error).toMatch(/checkout/i);
+    expect(mockPrisma.workspace.update).not.toHaveBeenCalled();
   });
 
   it("refuses an admin, who can manage the workspace but not the billing", async () => {
@@ -376,7 +387,7 @@ describe("POST /api/workspace/plan is owner only", () => {
   });
 
   it("scopes the write to the caller's own workspace", async () => {
-    await post({ plan: "PRO", workspaceId: "workspace_someone_else" });
+    await post({ plan: "FREE", workspaceId: "workspace_someone_else" });
 
     expect(mockPrisma.workspace.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "workspace_1" } })

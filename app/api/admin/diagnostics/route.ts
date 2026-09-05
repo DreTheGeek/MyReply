@@ -1,19 +1,52 @@
 import { NextResponse } from "next/server";
-import { getCurrentWorkspaceId } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
-import { getDMQueue } from "@/lib/queue/client";
 import { getWorkerAlerts, getWorkerHealth } from "@/lib/ops/worker-health";
+import {
+  canManageWorkspace,
+  getCurrentWorkspaceContext,
+} from "@/lib/workspace-access";
 
 export const runtime = "nodejs";
 
+/**
+ * This workspace's own backlog, in the shape the page already renders.
+ *
+ * The queue itself has no tenant dimension, so asking BullMQ for job counts
+ * reports every workspace's work. These come from DmLog, which is scoped, and
+ * mean the same thing to the person reading the page: what of mine is waiting,
+ * and what of mine broke.
+ */
+async function workspaceQueueCounts(
+  workspaceId: string
+): Promise<Record<string, number>> {
+  const [waiting, failed] = await Promise.all([
+    prisma.dmLog.count({ where: { workspaceId, status: "PENDING" } }),
+    prisma.dmLog.count({ where: { workspaceId, status: "FAILED" } }),
+  ]);
+  return { waiting, failed };
+}
+
 export async function GET() {
-  const workspaceId = await getCurrentWorkspaceId();
-  if (!workspaceId) {
+  const context = await getCurrentWorkspaceContext();
+  if (!context) {
     return NextResponse.json(
       { success: false, error: "Unauthorized" },
       { status: 401 }
     );
   }
+
+  // This route sits under /admin/ and reports infrastructure state, and it had
+  // no role check at all: any member of any tenant could read it. Diagnostics
+  // are an operator concern, so they need the same gate every other write-shaped
+  // surface uses.
+  if (!canManageWorkspace(context.role)) {
+    return NextResponse.json(
+      { success: false, error: "Only owners and admins can view diagnostics" },
+      { status: 403 }
+    );
+  }
+
+  const workspaceId = context.workspaceId;
 
   const [
     queueCounts,
@@ -24,7 +57,10 @@ export async function GET() {
     tokenRefreshFailures,
     operationalEvents,
   ] = await Promise.all([
-    getDMQueue().getJobCounts("waiting", "active", "delayed", "failed"),
+    // Queue depth is fleet-wide: it counts every tenant's jobs. Reporting it
+    // here told each workspace how busy every other one is. This workspace's
+    // own backlog is what the page actually needs, and DmLog is scoped.
+    workspaceQueueCounts(workspaceId),
     getWorkerHealth(),
     getWorkerAlerts(10),
     prisma.webhookEvent.findMany({
@@ -74,10 +110,11 @@ export async function GET() {
         payload: true,
       },
     }),
+    // Scoped to this workspace only. This previously unioned
+    // `workspaceId: null`, which is where system-wide events land, so every
+    // tenant could read the platform's own operational feed.
     prisma.operationalEvent.findMany({
-      where: {
-        OR: [{ workspaceId }, { workspaceId: null }],
-      },
+      where: { workspaceId },
       orderBy: { createdAt: "desc" },
       take: 20,
       select: {
