@@ -1,5 +1,15 @@
+/**
+ * The marketing view of a template: the vertical, the playbook, the metrics.
+ * This file is the SEO surface and holds prose only. What actually gets built
+ * when someone taps "Use this template" is `installSlug`, which names an entry
+ * in lib/templates/catalogue.ts. Keeping the two apart means there is exactly
+ * one definition of a campaign in the product, and a landing page can never
+ * drift from the campaign it sells.
+ */
 export interface CampaignTemplate {
   slug: string;
+  /** The catalogue entry this page installs. */
+  installSlug: string;
   title: string;
   category: string;
   audience: string;
@@ -20,6 +30,7 @@ export interface CampaignTemplate {
 export const CAMPAIGN_TEMPLATES: CampaignTemplate[] = [
   {
     slug: "dtc-product-link",
+    installSlug: "link-in-bio",
     title: "DTC Product Link Drop",
     category: "Social commerce",
     audience: "DTC brands",
@@ -46,6 +57,7 @@ export const CAMPAIGN_TEMPLATES: CampaignTemplate[] = [
   },
   {
     slug: "real-estate-lead-form",
+    installSlug: "lead-magnet",
     title: "Real Estate Lead Form",
     category: "Lead generation",
     audience: "Agents and broker teams",
@@ -72,6 +84,7 @@ export const CAMPAIGN_TEMPLATES: CampaignTemplate[] = [
   },
   {
     slug: "fitness-plan",
+    installSlug: "lead-magnet",
     title: "Fitness Plan Download",
     category: "Creator funnels",
     audience: "Coaches and fitness creators",
@@ -98,6 +111,7 @@ export const CAMPAIGN_TEMPLATES: CampaignTemplate[] = [
   },
   {
     slug: "course-webinar",
+    installSlug: "waitlist-signup",
     title: "Course Webinar Invite",
     category: "Education",
     audience: "Course sellers",
@@ -124,6 +138,7 @@ export const CAMPAIGN_TEMPLATES: CampaignTemplate[] = [
   },
   {
     slug: "beauty-price-list",
+    installSlug: "price-question",
     title: "Beauty Service Price List",
     category: "Local services",
     audience: "Salons, spas, and beauty pros",
@@ -150,6 +165,7 @@ export const CAMPAIGN_TEMPLATES: CampaignTemplate[] = [
   },
   {
     slug: "restaurant-menu",
+    installSlug: "booking-request",
     title: "Restaurant Menu And Reservation",
     category: "Hospitality",
     audience: "Restaurants and cafes",
@@ -176,6 +192,7 @@ export const CAMPAIGN_TEMPLATES: CampaignTemplate[] = [
   },
   {
     slug: "event-rsvp",
+    installSlug: "waitlist-signup",
     title: "Event RSVP Campaign",
     category: "Events",
     audience: "Venues, communities, and launch teams",
@@ -202,6 +219,7 @@ export const CAMPAIGN_TEMPLATES: CampaignTemplate[] = [
   },
   {
     slug: "creator-media-kit",
+    installSlug: "vip-routing",
     title: "Creator Media Kit Reply",
     category: "Creator business",
     audience: "Creators and agencies",
@@ -235,4 +253,16 @@ export function getCampaignTemplate(slug: string | null | undefined) {
 
 export function getCampaignTemplateSlugs() {
   return CAMPAIGN_TEMPLATES.map((template) => template.slug);
+}
+
+/**
+ * Where "Use this template" goes.
+ *
+ * One href for everybody. A signed-in visitor lands in the in-app gallery with
+ * this template already picked and one tap left; a signed-out visitor lands on
+ * the same URL, which tells them what they chose and carries the choice
+ * through sign in instead of dropping it at the wall.
+ */
+export function buildTemplateInstallHref(template: CampaignTemplate): string {
+  return `/templates?install=${encodeURIComponent(template.installSlug)}`;
 }

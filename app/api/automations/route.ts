@@ -361,6 +361,20 @@ export async function POST(request: NextRequest) {
   }
 
   if (!instagramAccount) {
+    // Two different failures used to share one message. Someone who named an
+    // account that is not theirs, or that no longer exists, was told to
+    // "Connect Instagram" while looking at three connected accounts, which
+    // reads as a bug in the product rather than a mistake in the request.
+    if (requestedInstagramAccountId) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "That Instagram account is not connected to this workspace",
+        },
+        { status: 404 }
+      );
+    }
+
     return NextResponse.json(
       { success: false, error: "Connect Instagram before creating campaigns" },
       { status: 400 }

@@ -27,6 +27,7 @@ const navItems: NavItem[] = [
   { label: "Overview", href: "/overview" },
   { label: "Inbox", href: "/inbox" },
   { label: "Campaigns", href: "/campaigns" },
+  { label: "Templates", href: "/templates" },
   { label: "Contacts", href: "/contacts" },
   { label: "Answers", href: "/answers" },
   { label: "DM Logs", href: "/logs" },

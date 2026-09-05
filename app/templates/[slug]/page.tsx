@@ -4,10 +4,13 @@ import { notFound } from "next/navigation";
 import PublicSiteHeader from "@/components/public-site-header";
 import TemplateVisual from "@/components/template-visual";
 import {
+  buildTemplateInstallHref,
   CAMPAIGN_TEMPLATES,
   getCampaignTemplate,
   getCampaignTemplateSlugs,
 } from "@/lib/templates/campaign-templates";
+import { getTemplate } from "@/lib/templates/catalogue";
+import { describeKeywords, describeTrigger } from "@/lib/templates/gallery";
 
 type TemplatePageProps = {
   params: Promise<{ slug: string }>;
@@ -54,6 +57,12 @@ export default async function TemplateDetailPage({ params }: TemplatePageProps) 
     (item) => item.slug !== template.slug
   ).slice(0, 3);
 
+  // The campaign this page actually builds. Shown rather than described, so
+  // the words on the marketing page and the words that reach an audience are
+  // the same words.
+  const installable = getTemplate(template.installSlug);
+  const installHref = buildTemplateInstallHref(template);
+
   return (
     <main className="min-h-screen bg-background text-foreground">
       <PublicSiteHeader active="templates" />
@@ -78,7 +87,7 @@ export default async function TemplateDetailPage({ params }: TemplatePageProps) 
             </p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <Link
-                href={`/login?template=${template.slug}`}
+                href={installHref}
                 className="inline-flex items-center justify-center bg-cyan-300 px-6 py-3 text-sm font-bold text-zinc-950 transition hover:bg-cyan-200"
               >
                 Use this template
@@ -166,23 +175,50 @@ export default async function TemplateDetailPage({ params }: TemplatePageProps) 
           </section>
 
           <section className="border border-cyan-200/20 bg-cyan-300/10 p-6">
-            <div className="grid gap-5 lg:grid-cols-[1fr_auto] lg:items-center">
-              <div>
-                <h2 className="text-2xl font-black text-white">
-                  Copy this campaign into MyReply
-                </h2>
-                <p className="mt-2 text-sm leading-6 text-zinc-300">
-                  Sign in, connect Instagram, pick a post or reel, and the
-                  template copy will be ready for your campaign draft.
-                </p>
-              </div>
-              <Link
-                href={`/login?template=${template.slug}`}
-                className="inline-flex items-center justify-center bg-cyan-300 px-6 py-3 text-sm font-bold text-zinc-950 transition hover:bg-cyan-200"
-              >
-                Use this template
-              </Link>
-            </div>
+            <h2 className="text-2xl font-black text-white">
+              What one tap builds
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-zinc-300">
+              This is the campaign itself, not a draft to fill in. Every word
+              below is what your audience receives, and you can change all of it
+              afterwards.
+            </p>
+
+            {installable && (
+              <dl className="mt-5 space-y-3 border border-white/10 bg-zinc-950/60 p-5">
+                <div>
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Fires on
+                  </dt>
+                  <dd className="mt-1 text-sm text-zinc-200">
+                    {describeTrigger(installable)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    Keywords
+                  </dt>
+                  <dd className="mt-1 font-mono text-sm text-zinc-200">
+                    {describeKeywords(installable)}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                    The DM it sends
+                  </dt>
+                  <dd className="mt-1 text-sm leading-6 text-zinc-200">
+                    {installable.preset.dmMessage}
+                  </dd>
+                </div>
+              </dl>
+            )}
+
+            <Link
+              href={installHref}
+              className="mt-5 inline-flex items-center justify-center bg-cyan-300 px-6 py-3 text-sm font-bold text-zinc-950 transition hover:bg-cyan-200"
+            >
+              Use this template
+            </Link>
           </section>
         </div>
       </section>
