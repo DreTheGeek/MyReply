@@ -1,5 +1,7 @@
 "use client";
 
+import type { ChannelPlatform } from "@/lib/channels/platforms";
+
 import { useI18n } from "@/lib/i18n/provider";
 
 
@@ -8,6 +10,12 @@ export interface AccountOption {
   username: string;
   instagramId: string;
   name?: string | null;
+  /**
+   * Which platform the account is on, so screens show only what it supports.
+   * Optional because the picker itself never needs it; screens that gate
+   * features on it read it from a response that includes it.
+   */
+  platform?: ChannelPlatform;
 }
 
 interface AccountSelectProps {

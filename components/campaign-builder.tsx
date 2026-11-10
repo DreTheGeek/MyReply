@@ -25,6 +25,10 @@ import {
   type ImportRow,
 } from "@/lib/import-queue";
 import { DEFAULT_FOLLOW_PROMPT } from "@/lib/campaigns/follow-prompt";
+import {
+  campaignFeatureSupport,
+  getChannelCapabilities,
+} from "@/lib/channels/capabilities";
 
 type TriggerScope = "specific" | "any" | "next";
 type MatchMode = "specific" | "any";
@@ -150,6 +154,15 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
   const [accountsLoaded, setAccountsLoaded] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState("");
+
+  // What the selected account's platform can do. Each toggle below is shown
+  // only when it is supported, and a hidden one is never saved as on. Before
+  // an account is chosen nothing can be saved, so the form shows the full
+  // Instagram set rather than an empty shell.
+  const selectedPlatform =
+    accounts.find((account) => account.id === selectedAccountId)?.platform ??
+    "INSTAGRAM";
+  const support = campaignFeatureSupport(getChannelCapabilities(selectedPlatform));
 
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [isActive, setIsActive] = useState(true);
@@ -449,25 +462,26 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
       matchAnyWord: matchMode === "any",
       keywords: matchMode === "any" ? [] : keywords,
       wholeWordMatch,
-      dmTriggerEnabled,
-      storyReplyEnabled,
-      storyMentionEnabled,
-      liveCommentEnabled,
-      defaultReplyEnabled,
-      referralRef: referralRef.trim() || null,
+      dmTriggerEnabled: support.dmKeywordTrigger && dmTriggerEnabled,
+      storyReplyEnabled: support.storyReplyTrigger && storyReplyEnabled,
+      storyMentionEnabled: support.storyMentionTrigger && storyMentionEnabled,
+      liveCommentEnabled: support.liveCommentTrigger && liveCommentEnabled,
+      defaultReplyEnabled: support.defaultReply && defaultReplyEnabled,
+      referralRef: support.referralTrigger ? referralRef.trim() || null : null,
       dmMessage,
-      openingDmEnabled,
-      openingDmMessage: openingDmEnabled ? openingDmMessage : null,
-      openingDmButtonLabel: openingDmEnabled ? openingDmButtonLabel : null,
-      publicReplyEnabled,
-      publicReplyMessages: publicReplyEnabled
+      openingDmEnabled: support.openingDm && openingDmEnabled,
+      openingDmMessage: support.openingDm && openingDmEnabled ? openingDmMessage : null,
+      openingDmButtonLabel:
+        support.openingDm && openingDmEnabled ? openingDmButtonLabel : null,
+      publicReplyEnabled: support.publicReply && publicReplyEnabled,
+      publicReplyMessages: support.publicReply && publicReplyEnabled
         ? publicReplyMessages.map((m) => m.trim()).filter(Boolean)
         : [],
       trackedDestinationUrl: trackedDestinationUrl.trim() || "",
       linkButtonLabel: linkButtonLabel.trim() || "Open link",
       secondaryDestinationUrl: secondaryDestinationUrl.trim() || "",
       secondaryButtonLabel: secondaryButtonLabel.trim() || "Open link",
-      requireFollow,
+      requireFollow: support.followGate && requireFollow,
       followPromptMessage: requireFollow ? followPromptMessage.trim() : "",
       followPromptButtonLabel: requireFollow
         ? followPromptButtonLabel.trim() || "i'm following"
@@ -732,36 +746,38 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
           )}
         </div>
 
-        <Section title={t("When someone comments on")}>
-          <Radio
-            checked={triggerScope === "specific"}
-            onSelect={() => setTriggerScope("specific")}
-          >
-            {t("a specific post or reel")}
-          </Radio>
-          {triggerScope === "specific" && (
-            <div className="rounded-lg border border-border p-2">
-              <PostPicker
-                selectedPostId={postId}
-                instagramAccountId={selectedAccountId}
-                usedPostIds={usedPosts}
-                onSelect={handlePostSelect}
-              />
-            </div>
-          )}
-          <Radio
-            checked={triggerScope === "any"}
-            onSelect={() => setTriggerScope("any")}
-          >
-            {t("any post or reel")}
-          </Radio>
-          <Radio
-            checked={triggerScope === "next"}
-            onSelect={() => setTriggerScope("next")}
-          >
-            {t("next post or reel")}
-          </Radio>
-        </Section>
+        {support.commentTrigger && (
+          <Section title={t("When someone comments on")}>
+            <Radio
+              checked={triggerScope === "specific"}
+              onSelect={() => setTriggerScope("specific")}
+            >
+              {t("a specific post or reel")}
+            </Radio>
+            {triggerScope === "specific" && (
+              <div className="rounded-lg border border-border p-2">
+                <PostPicker
+                  selectedPostId={postId}
+                  instagramAccountId={selectedAccountId}
+                  usedPostIds={usedPosts}
+                  onSelect={handlePostSelect}
+                />
+              </div>
+            )}
+            <Radio
+              checked={triggerScope === "any"}
+              onSelect={() => setTriggerScope("any")}
+            >
+              {t("any post or reel")}
+            </Radio>
+            <Radio
+              checked={triggerScope === "next"}
+              onSelect={() => setTriggerScope("next")}
+            >
+              {t("next post or reel")}
+            </Radio>
+          </Section>
+        )}
 
         <Section title={t("And this comment has")}>
           <Radio
@@ -799,78 +815,86 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
           >
             {t("any word")}
           </Radio>
-          <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
-            <span className="text-sm text-foreground">
-              {t("also reply when someone DMs")}{" "}
-              {matchMode === "any" ? t("anything") : t("these words")}
-            </span>
-            <Toggle
-              on={dmTriggerEnabled}
-              onToggle={() => setDmTriggerEnabled(!dmTriggerEnabled)}
-            />
-          </div>
-          {dmTriggerEnabled && (
-            <p className="text-xs text-muted">
-              {matchMode === "any"
-                ? t("Every DM to this account gets the reply below. Use with care.")
-                : t("A DM containing any of these words gets the same reply, no comment needed.")}
-            </p>
+          {support.dmKeywordTrigger && (
+            <>
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
+              <span className="text-sm text-foreground">
+                {t("also reply when someone DMs")}{" "}
+                {matchMode === "any" ? t("anything") : t("these words")}
+              </span>
+              <Toggle
+                on={dmTriggerEnabled}
+                onToggle={() => setDmTriggerEnabled(!dmTriggerEnabled)}
+              />
+            </div>
+            {dmTriggerEnabled && (
+              <p className="text-xs text-muted">
+                {matchMode === "any"
+                  ? t("Every DM to this account gets the reply below. Use with care.")
+                  : t("A DM containing any of these words gets the same reply, no comment needed.")}
+              </p>
+            )}
+            </>
           )}
-          <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5">
-            <span className="text-sm text-foreground">
-              {t("reply to their comments under the post")}
-            </span>
-            <Toggle
-              on={publicReplyEnabled}
-              onToggle={() => setPublicReplyEnabled(!publicReplyEnabled)}
-            />
-          </div>
-          {publicReplyEnabled && (
-            <div className="space-y-2">
-              {publicReplyMessages.map((msg, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <input
-                    value={msg}
-                    onChange={(e) =>
-                      setPublicReplyMessages((prev) =>
-                        prev.map((m, idx) => (idx === i ? e.target.value : m))
-                      )
-                    }
-                    placeholder={t("Sent you a DM! 📩")}
-                    maxLength={1000}
-                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
-                  />
-                  {publicReplyMessages.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() =>
+          {support.publicReply && (
+            <>
+            <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5">
+              <span className="text-sm text-foreground">
+                {t("reply to their comments under the post")}
+              </span>
+              <Toggle
+                on={publicReplyEnabled}
+                onToggle={() => setPublicReplyEnabled(!publicReplyEnabled)}
+              />
+            </div>
+            {publicReplyEnabled && (
+              <div className="space-y-2">
+                {publicReplyMessages.map((msg, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <input
+                      value={msg}
+                      onChange={(e) =>
                         setPublicReplyMessages((prev) =>
-                          prev.filter((_, idx) => idx !== i)
+                          prev.map((m, idx) => (idx === i ? e.target.value : m))
                         )
                       }
-                      className="shrink-0 px-2 text-muted hover:text-error"
-                      aria-label={t("Remove reply")}
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-              ))}
-              {publicReplyMessages.length < 10 && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    setPublicReplyMessages((prev) => [...prev, ""])
-                  }
-                  className="text-xs font-medium text-accent hover:underline"
-                >
-                  {t("+ Add another reply")}
-                </button>
-              )}
-              <p className="text-xs text-muted">
-                {t("One is picked at random each time, so replies don't look identical.")}
-              </p>
-            </div>
+                      placeholder={t("Sent you a DM! 📩")}
+                      maxLength={1000}
+                      className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+                    />
+                    {publicReplyMessages.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPublicReplyMessages((prev) =>
+                            prev.filter((_, idx) => idx !== i)
+                          )
+                        }
+                        className="shrink-0 px-2 text-muted hover:text-error"
+                        aria-label={t("Remove reply")}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {publicReplyMessages.length < 10 && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPublicReplyMessages((prev) => [...prev, ""])
+                    }
+                    className="text-xs font-medium text-accent hover:underline"
+                  >
+                    {t("+ Add another reply")}
+                  </button>
+                )}
+                <p className="text-xs text-muted">
+                  {t("One is picked at random each time, so replies don't look identical.")}
+                </p>
+              </div>
+            )}
+            </>
           )}
           {/* Places this campaign can fire other than the comment section.
               They all reuse the words above, except the story mention, which
@@ -878,136 +902,164 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
           <p className="pt-1 text-xs font-semibold text-muted">
             Other ways to trigger this campaign
           </p>
-          <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
-            <span className="text-sm text-foreground">
-              when someone replies to your story with{" "}
-              {matchMode === "any" ? "anything" : "these words"}
-            </span>
-            <Toggle
-              on={storyReplyEnabled}
-              onToggle={() => setStoryReplyEnabled(!storyReplyEnabled)}
-            />
-          </div>
-          <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
-            <span className="text-sm text-foreground">
-              when someone mentions you in their story
-            </span>
-            <Toggle
-              on={storyMentionEnabled}
-              onToggle={() => setStoryMentionEnabled(!storyMentionEnabled)}
-            />
-          </div>
-          {storyMentionEnabled && (
-            <p className="text-xs text-muted">
-              A story mention has no text, so your words above are ignored here.
-              Every mention gets the reply.
-            </p>
+          {support.storyReplyTrigger && (
+            <>
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
+              <span className="text-sm text-foreground">
+                when someone replies to your story with{" "}
+                {matchMode === "any" ? "anything" : "these words"}
+              </span>
+              <Toggle
+                on={storyReplyEnabled}
+                onToggle={() => setStoryReplyEnabled(!storyReplyEnabled)}
+              />
+            </div>
+            </>
           )}
-          <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
-            <span className="text-sm text-foreground">
-              when someone comments{" "}
-              {matchMode === "any" ? "anything" : "these words"} on your live
-            </span>
-            <Toggle
-              on={liveCommentEnabled}
-              onToggle={() => setLiveCommentEnabled(!liveCommentEnabled)}
-            />
-          </div>
-          <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
-            <span className="text-sm text-foreground">
-              when a DM matches none of your other campaigns
-            </span>
-            <Toggle
-              on={defaultReplyEnabled}
-              onToggle={() => setDefaultReplyEnabled(!defaultReplyEnabled)}
-            />
-          </div>
-          {defaultReplyEnabled && (
-            <p className="text-xs text-muted">
-              This is your catch-all answer, sent only after every other
-              campaign passes. Keep it on one campaign per account.
-            </p>
+          {support.storyMentionTrigger && (
+            <>
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
+              <span className="text-sm text-foreground">
+                when someone mentions you in their story
+              </span>
+              <Toggle
+                on={storyMentionEnabled}
+                onToggle={() => setStoryMentionEnabled(!storyMentionEnabled)}
+              />
+            </div>
+            {storyMentionEnabled && (
+              <p className="text-xs text-muted">
+                A story mention has no text, so your words above are ignored here.
+                Every mention gets the reply.
+              </p>
+            )}
+            </>
           )}
-          <div className="rounded-lg border border-border p-3 space-y-2">
-            <span className="text-sm text-foreground">
-              when someone starts a chat from a link or QR code
-            </span>
-            <input
-              value={referralRef}
-              onChange={(e) => setReferralRef(e.target.value)}
-              placeholder="e.g. spring-flyer"
-              maxLength={100}
-              className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
-            />
-            <p className="text-xs text-muted">
-              Put this exact ref on your link, QR code or website button. Leave
-              it empty if you are not using one.
-            </p>
-          </div>
+          {support.liveCommentTrigger && (
+            <>
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
+              <span className="text-sm text-foreground">
+                when someone comments{" "}
+                {matchMode === "any" ? "anything" : "these words"} on your live
+              </span>
+              <Toggle
+                on={liveCommentEnabled}
+                onToggle={() => setLiveCommentEnabled(!liveCommentEnabled)}
+              />
+            </div>
+            </>
+          )}
+          {support.defaultReply && (
+            <>
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
+              <span className="text-sm text-foreground">
+                when a DM matches none of your other campaigns
+              </span>
+              <Toggle
+                on={defaultReplyEnabled}
+                onToggle={() => setDefaultReplyEnabled(!defaultReplyEnabled)}
+              />
+            </div>
+            {defaultReplyEnabled && (
+              <p className="text-xs text-muted">
+                This is your catch-all answer, sent only after every other
+                campaign passes. Keep it on one campaign per account.
+              </p>
+            )}
+            </>
+          )}
+          {support.referralTrigger && (
+            <>
+            <div className="rounded-lg border border-border p-3 space-y-2">
+              <span className="text-sm text-foreground">
+                when someone starts a chat from a link or QR code
+              </span>
+              <input
+                value={referralRef}
+                onChange={(e) => setReferralRef(e.target.value)}
+                placeholder="e.g. spring-flyer"
+                maxLength={100}
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+              />
+              <p className="text-xs text-muted">
+                Put this exact ref on your link, QR code or website button. Leave
+                it empty if you are not using one.
+              </p>
+            </div>
+            </>
+          )}
         </Section>
 
         <Section title={t("They will get")}>
-          <div className="rounded-lg border border-border p-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-foreground">{t("an opening DM")}</span>
-              <Toggle
-                on={openingDmEnabled}
-                onToggle={() => setOpeningDmEnabled(!openingDmEnabled)}
-              />
-            </div>
-            {openingDmEnabled && (
-              <div className="mt-3 space-y-2">
-                <textarea
-                  value={openingDmMessage}
-                  onChange={(e) => setOpeningDmMessage(e.target.value)}
-                  placeholder={t("Hey there! I'm so happy you're here 😊")}
-                  rows={3}
-                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
-                  maxLength={1000}
-                />
-                <input
-                  value={openingDmButtonLabel}
-                  onChange={(e) => setOpeningDmButtonLabel(e.target.value)}
-                  placeholder={t("Send me the link")}
-                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
-                  maxLength={64}
+          {support.openingDm && (
+            <>
+            <div className="rounded-lg border border-border p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-foreground">{t("an opening DM")}</span>
+                <Toggle
+                  on={openingDmEnabled}
+                  onToggle={() => setOpeningDmEnabled(!openingDmEnabled)}
                 />
               </div>
-            )}
-          </div>
-          <div className="mt-3 rounded-lg border border-border p-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-foreground">
-                {t("a follow requirement first")}
-              </span>
-              <Toggle
-                on={requireFollow}
-                onToggle={() => setRequireFollow(!requireFollow)}
-              />
+              {openingDmEnabled && (
+                <div className="mt-3 space-y-2">
+                  <textarea
+                    value={openingDmMessage}
+                    onChange={(e) => setOpeningDmMessage(e.target.value)}
+                    placeholder={t("Hey there! I'm so happy you're here 😊")}
+                    rows={3}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
+                    maxLength={1000}
+                  />
+                  <input
+                    value={openingDmButtonLabel}
+                    onChange={(e) => setOpeningDmButtonLabel(e.target.value)}
+                    placeholder={t("Send me the link")}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+                    maxLength={64}
+                  />
+                </div>
+              )}
             </div>
-            {requireFollow && (
-              <div className="mt-3 space-y-2">
-                <textarea
-                  value={followPromptMessage}
-                  onChange={(e) => setFollowPromptMessage(e.target.value)}
-                  placeholder={t(DEFAULT_FOLLOW_PROMPT)}
-                  rows={3}
-                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
-                  maxLength={1000}
+            </>
+          )}
+          {support.followGate && (
+            <>
+            <div className="mt-3 rounded-lg border border-border p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-foreground">
+                  {t("a follow requirement first")}
+                </span>
+                <Toggle
+                  on={requireFollow}
+                  onToggle={() => setRequireFollow(!requireFollow)}
                 />
-                <input
-                  value={followPromptButtonLabel}
-                  onChange={(e) => setFollowPromptButtonLabel(e.target.value)}
-                  placeholder={t("i'm following")}
-                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
-                  maxLength={20}
-                />
-                <p className="text-xs text-muted">
-                  {t("We send the link only after they tap the button and Instagram confirms the follow. If it can't be verified, we send it anyway.")}
-                </p>
               </div>
-            )}
-          </div>
+              {requireFollow && (
+                <div className="mt-3 space-y-2">
+                  <textarea
+                    value={followPromptMessage}
+                    onChange={(e) => setFollowPromptMessage(e.target.value)}
+                    placeholder={t(DEFAULT_FOLLOW_PROMPT)}
+                    rows={3}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
+                    maxLength={1000}
+                  />
+                  <input
+                    value={followPromptButtonLabel}
+                    onChange={(e) => setFollowPromptButtonLabel(e.target.value)}
+                    placeholder={t("i'm following")}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+                    maxLength={20}
+                  />
+                  <p className="text-xs text-muted">
+                    {t("We send the link only after they tap the button and Instagram confirms the follow. If it can't be verified, we send it anyway.")}
+                  </p>
+                </div>
+              )}
+            </div>
+            </>
+          )}
         </Section>
 
         <Section title={t("And then, they will get")}>
@@ -1030,37 +1082,41 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                   placeholder="https://yourlink.com/offer"
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
                 />
-                <input
-                  value={linkButtonLabel}
-                  onChange={(e) => setLinkButtonLabel(e.target.value)}
-                  placeholder={t("Button label (e.g. Open link)")}
-                  maxLength={20}
-                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
-                />
-                {secondLinkOpen ? (
-                  <div className="space-y-2 border-t border-border pt-2">
-                    <input
-                      value={secondaryDestinationUrl}
-                      onChange={(e) => setSecondaryDestinationUrl(e.target.value)}
-                      placeholder="https://yourlink.com/second"
-                      className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
-                    />
-                    <input
-                      value={secondaryButtonLabel}
-                      onChange={(e) => setSecondaryButtonLabel(e.target.value)}
-                      placeholder={t("Second button label")}
-                      maxLength={20}
-                      className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
-                    />
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setSecondLinkOpen(true)}
-                    className="w-full rounded-lg border border-border py-2 text-sm text-muted hover:text-foreground"
-                  >
-                    {t("+ Add A Second Link")}
-                  </button>
+                {support.linkButtons && (
+                  <>
+                  <input
+                    value={linkButtonLabel}
+                    onChange={(e) => setLinkButtonLabel(e.target.value)}
+                    placeholder={t("Button label (e.g. Open link)")}
+                    maxLength={20}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+                  />
+                  {secondLinkOpen ? (
+                    <div className="space-y-2 border-t border-border pt-2">
+                      <input
+                        value={secondaryDestinationUrl}
+                        onChange={(e) => setSecondaryDestinationUrl(e.target.value)}
+                        placeholder="https://yourlink.com/second"
+                        className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+                      />
+                      <input
+                        value={secondaryButtonLabel}
+                        onChange={(e) => setSecondaryButtonLabel(e.target.value)}
+                        placeholder={t("Second button label")}
+                        maxLength={20}
+                        className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+                      />
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setSecondLinkOpen(true)}
+                      className="w-full rounded-lg border border-border py-2 text-sm text-muted hover:text-foreground"
+                    >
+                      {t("+ Add A Second Link")}
+                    </button>
+                  )}
+                  </>
                 )}
               </div>
             ) : (

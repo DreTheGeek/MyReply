@@ -11,6 +11,20 @@ import { InstagramConnectNotice } from "@/components/instagram-connect-notice";
 import AiKeySection from "@/components/settings/ai-key-section";
 import ApiKeysSection from "@/components/settings/api-keys-section";
 import PersistentMenuSection from "@/components/settings/persistent-menu-section";
+import { getChannelCapabilities } from "@/lib/channels/capabilities";
+import type { ChannelPlatform } from "@/lib/channels/platforms";
+
+/**
+ * Whether an account's platform offers a profile setting. An account read
+ * from a response without a platform is treated as Instagram, the only
+ * platform such rows can come from.
+ */
+function supportsSetting(
+  account: { platform?: ChannelPlatform },
+  setting: "iceBreakers" | "persistentMenu"
+): boolean {
+  return getChannelCapabilities(account.platform ?? "INSTAGRAM")[setting].supported;
+}
 import KnowledgeSection from "@/components/settings/knowledge-section";
 import AnsweringSection from "@/components/settings/answering-section";
 
@@ -104,8 +118,12 @@ export default function SettingsPage() {
       .then(([statsPayload, membersPayload]) => {
         if (statsPayload.success) {
           setData(statsPayload.data);
+          // The first account whose platform has conversation starters.
           setStarterAccountId(
-            statsPayload.data.instagramAccounts?.[0]?.id ?? null
+            (statsPayload.data.instagramAccounts ?? []).find(
+              (account: { platform?: ChannelPlatform }) =>
+                supportsSetting(account, "iceBreakers")
+            )?.id ?? null
           );
           setLoadError(null);
         } else {
@@ -343,6 +361,13 @@ export default function SettingsPage() {
   }
 
   const accounts = data?.instagramAccounts ?? [];
+  // Each profile setting is offered only for accounts whose platform has it.
+  const iceBreakerAccounts = accounts.filter((account) =>
+    supportsSetting(account, "iceBreakers")
+  );
+  const menuAccounts = accounts.filter((account) =>
+    supportsSetting(account, "persistentMenu")
+  );
   const canManageMembers =
     membersData?.currentUserRole === "OWNER" ||
     membersData?.currentUserRole === "ADMIN";
@@ -465,172 +490,174 @@ export default function SettingsPage() {
 
       <AuditLogSection />
 
-      <section id="conversation-starters" className="panel rounded p-4 sm:p-6">
-        <h2 className="text-base font-semibold mb-2">Conversation starters</h2>
-        <p className="text-xs text-muted mb-6">
-          Tappable prompts Instagram shows someone opening a fresh DM thread with
-          you. Instagram displays at most {MAX_STARTERS}, and saving replaces the
-          whole set. The payload is what your automations receive when the prompt
-          is tapped, so use the campaign keyword.
-        </p>
-
-        {accounts.length === 0 ? (
-          <p className="text-sm text-muted">
-            Connect an Instagram professional account to set conversation
-            starters.
+      {(accounts.length === 0 || iceBreakerAccounts.length > 0) && (
+        <section id="conversation-starters" className="panel rounded p-4 sm:p-6">
+          <h2 className="text-base font-semibold mb-2">Conversation starters</h2>
+          <p className="text-xs text-muted mb-6">
+            Tappable prompts Instagram shows someone opening a fresh DM thread with
+            you. Instagram displays at most {MAX_STARTERS}, and saving replaces the
+            whole set. The payload is what your automations receive when the prompt
+            is tapped, so use the campaign keyword.
           </p>
-        ) : (
-          <div className="space-y-4">
-            {accounts.length > 1 && (
-              <div>
-                <label
-                  htmlFor="starter-account"
-                  className="mb-1.5 block text-xs font-medium text-muted"
+
+          {iceBreakerAccounts.length === 0 ? (
+            <p className="text-sm text-muted">
+              Connect an Instagram professional account to set conversation
+              starters.
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {iceBreakerAccounts.length > 1 && (
+                <div>
+                  <label
+                    htmlFor="starter-account"
+                    className="mb-1.5 block text-xs font-medium text-muted"
+                  >
+                    Account
+                  </label>
+                  <select
+                    id="starter-account"
+                    value={starterAccountId ?? ""}
+                    onChange={(event) => {
+                      // Cleared here rather than in the loading effect: a
+                      // message about the previous account must not linger on
+                      // the next one, and resetting state inside the effect
+                      // re-renders the whole page a second time.
+                      setStarterError(null);
+                      setStarterNotice(null);
+                      setStarterAccountId(event.target.value);
+                    }}
+                    className="w-full rounded border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-accent/40"
+                  >
+                    {iceBreakerAccounts.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        @{account.username}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {!startersReadable && (
+                <p className="rounded border border-border bg-surface/70 p-3 text-xs text-muted">
+                  Instagram does not report the prompts already live on this
+                  account, so this list starts empty. Saving still replaces
+                  whatever is there.
+                </p>
+              )}
+
+              {starters.length === 0 && (
+                <p className="text-sm text-muted">No starters set up yet.</p>
+              )}
+
+              {starters.map((row, index) => (
+                <div
+                  key={row.id}
+                  className="space-y-3 rounded border border-border bg-surface/70 p-4"
                 >
-                  Account
-                </label>
-                <select
-                  id="starter-account"
-                  value={starterAccountId ?? ""}
-                  onChange={(event) => {
-                    // Cleared here rather than in the loading effect: a
-                    // message about the previous account must not linger on
-                    // the next one, and resetting state inside the effect
-                    // re-renders the whole page a second time.
-                    setStarterError(null);
-                    setStarterNotice(null);
-                    setStarterAccountId(event.target.value);
-                  }}
-                  className="w-full rounded border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-accent/40"
-                >
-                  {accounts.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      @{account.username}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs font-semibold text-muted">
+                      Prompt {index + 1}
+                    </span>
+                    {canManageStarters && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setStarters((rows) =>
+                            rows.filter((existing) => existing.id !== row.id)
+                          )
+                        }
+                        className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-border-hover hover:text-foreground"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
 
-            {!startersReadable && (
-              <p className="rounded border border-border bg-surface/70 p-3 text-xs text-muted">
-                Instagram does not report the prompts already live on this
-                account, so this list starts empty. Saving still replaces
-                whatever is there.
-              </p>
-            )}
-
-            {starters.length === 0 && (
-              <p className="text-sm text-muted">No starters set up yet.</p>
-            )}
-
-            {starters.map((row, index) => (
-              <div
-                key={row.id}
-                className="space-y-3 rounded border border-border bg-surface/70 p-4"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-semibold text-muted">
-                    Prompt {index + 1}
-                  </span>
-                  {canManageStarters && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setStarters((rows) =>
-                          rows.filter((existing) => existing.id !== row.id)
-                        )
+                  <div>
+                    <input
+                      type="text"
+                      value={row.question}
+                      onChange={(event) =>
+                        updateStarter(row.id, "question", event.target.value)
                       }
-                      className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-border-hover hover:text-foreground"
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
+                      disabled={!canManageStarters}
+                      maxLength={MAX_STARTER_QUESTION}
+                      placeholder="Send me the free guide"
+                      className="w-full rounded border border-border bg-surface px-4 py-2 text-sm text-foreground outline-none transition-colors focus:border-accent/40 disabled:opacity-50"
+                    />
+                    <p className="mt-1 text-xs text-muted">
+                      What the person taps. {row.question.length} of{" "}
+                      {MAX_STARTER_QUESTION} characters.
+                    </p>
+                  </div>
 
-                <div>
-                  <input
-                    type="text"
-                    value={row.question}
-                    onChange={(event) =>
-                      updateStarter(row.id, "question", event.target.value)
+                  <div>
+                    <input
+                      type="text"
+                      value={row.payload}
+                      onChange={(event) =>
+                        updateStarter(row.id, "payload", event.target.value)
+                      }
+                      disabled={!canManageStarters}
+                      maxLength={MAX_STARTER_PAYLOAD}
+                      placeholder="GUIDE"
+                      className="w-full rounded border border-border bg-surface px-4 py-2 text-sm text-foreground outline-none transition-colors focus:border-accent/40 disabled:opacity-50"
+                    />
+                    <p className="mt-1 text-xs text-muted">
+                      Payload sent back to your automations on tap.
+                    </p>
+                  </div>
+                </div>
+              ))}
+
+              {canManageStarters ? (
+                <div className="flex flex-wrap gap-2 border-t border-border pt-4">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setStarters((rows) => [...rows, newStarterRow()])
                     }
-                    disabled={!canManageStarters}
-                    maxLength={MAX_STARTER_QUESTION}
-                    placeholder="Send me the free guide"
-                    className="w-full rounded border border-border bg-surface px-4 py-2 text-sm text-foreground outline-none transition-colors focus:border-accent/40 disabled:opacity-50"
-                  />
-                  <p className="mt-1 text-xs text-muted">
-                    What the person taps. {row.question.length} of{" "}
-                    {MAX_STARTER_QUESTION} characters.
-                  </p>
+                    disabled={starters.length >= MAX_STARTERS}
+                    className="rounded border border-border px-4 py-2 text-sm font-medium text-muted transition-colors hover:border-border-hover hover:text-foreground disabled:opacity-50"
+                  >
+                    {starters.length >= MAX_STARTERS
+                      ? `${MAX_STARTERS} is the Instagram limit`
+                      : "Add starter"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveStarters}
+                    disabled={busy === "starters:save"}
+                    className="rounded bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-50"
+                  >
+                    {busy === "starters:save" ? "Saving..." : "Save starters"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearStarters}
+                    disabled={busy === "starters:clear"}
+                    className="rounded border border-border px-4 py-2 text-sm font-medium text-muted transition-colors hover:border-border-hover hover:text-foreground disabled:opacity-50"
+                  >
+                    {busy === "starters:clear" ? "Clearing..." : "Clear all"}
+                  </button>
                 </div>
+              ) : (
+                <p className="border-t border-border pt-4 text-xs text-muted">
+                  Only owners and admins can change conversation starters.
+                </p>
+              )}
 
-                <div>
-                  <input
-                    type="text"
-                    value={row.payload}
-                    onChange={(event) =>
-                      updateStarter(row.id, "payload", event.target.value)
-                    }
-                    disabled={!canManageStarters}
-                    maxLength={MAX_STARTER_PAYLOAD}
-                    placeholder="GUIDE"
-                    className="w-full rounded border border-border bg-surface px-4 py-2 text-sm text-foreground outline-none transition-colors focus:border-accent/40 disabled:opacity-50"
-                  />
-                  <p className="mt-1 text-xs text-muted">
-                    Payload sent back to your automations on tap.
-                  </p>
-                </div>
-              </div>
-            ))}
-
-            {canManageStarters ? (
-              <div className="flex flex-wrap gap-2 border-t border-border pt-4">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setStarters((rows) => [...rows, newStarterRow()])
-                  }
-                  disabled={starters.length >= MAX_STARTERS}
-                  className="rounded border border-border px-4 py-2 text-sm font-medium text-muted transition-colors hover:border-border-hover hover:text-foreground disabled:opacity-50"
-                >
-                  {starters.length >= MAX_STARTERS
-                    ? `${MAX_STARTERS} is the Instagram limit`
-                    : "Add starter"}
-                </button>
-                <button
-                  type="button"
-                  onClick={saveStarters}
-                  disabled={busy === "starters:save"}
-                  className="rounded bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-50"
-                >
-                  {busy === "starters:save" ? "Saving..." : "Save starters"}
-                </button>
-                <button
-                  type="button"
-                  onClick={clearStarters}
-                  disabled={busy === "starters:clear"}
-                  className="rounded border border-border px-4 py-2 text-sm font-medium text-muted transition-colors hover:border-border-hover hover:text-foreground disabled:opacity-50"
-                >
-                  {busy === "starters:clear" ? "Clearing..." : "Clear all"}
-                </button>
-              </div>
-            ) : (
-              <p className="border-t border-border pt-4 text-xs text-muted">
-                Only owners and admins can change conversation starters.
-              </p>
-            )}
-
-            {starterError && (
-              <p className="text-sm text-error">{starterError}</p>
-            )}
-            {starterNotice && (
-              <p className="text-sm text-muted">{starterNotice}</p>
-            )}
-          </div>
-        )}
-      </section>
+              {starterError && (
+                <p className="text-sm text-error">{starterError}</p>
+              )}
+              {starterNotice && (
+                <p className="text-sm text-muted">{starterNotice}</p>
+              )}
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="panel rounded p-4 sm:p-6">
         <h2 className="text-base font-semibold mb-6">{t("Team")}</h2>
@@ -734,10 +761,12 @@ export default function SettingsPage() {
         )}
       </section>
 
-      <PersistentMenuSection
-        accounts={data?.instagramAccounts ?? []}
-        currentUserRole={membersData?.currentUserRole ?? null}
-      />
+      {(accounts.length === 0 || menuAccounts.length > 0) && (
+        <PersistentMenuSection
+          accounts={menuAccounts}
+          currentUserRole={membersData?.currentUserRole ?? null}
+        />
+      )}
 
       <KnowledgeSection currentUserRole={membersData?.currentUserRole ?? null} />
 
