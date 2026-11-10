@@ -26,6 +26,8 @@ All times are UTC. See [Time zones](#time-zones) below.
 | `myreply_snapshot_followers` | `0 7 * * *` | `GET /api/cron/snapshot-followers` | Records one follower total per connected account per day. A missed run loses that day permanently. |
 | `myreply_ingest_knowledge` | `*/15 * * * *` | `GET /api/cron/ingest-knowledge` | Retries abandoned knowledge ingests and re-crawls sources that came due. |
 | `myreply_settle_responses` | `*/5 * * * *` | nothing, runs in the database | Copies pg_net HTTP responses onto the request log before pg_net drops them. This is what makes the other four observable. |
+| `myreply_prune_engine` | `45 3 * * *` | nothing, runs in the database | Deletes capture asks after 30 days, button tap claims after 90 and data deletion requests after a year. |
+| `myreply_prune_platform` | `0 4 * * *` | nothing, runs in the database | Deletes idempotency records after 24 hours and webhook delivery logs after 30 days. |
 
 ## Where it is defined
 
