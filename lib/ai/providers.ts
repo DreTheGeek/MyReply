@@ -23,8 +23,10 @@ export interface ProviderSpec {
 }
 
 /**
- * Both defaults are the same Claude model. OpenRouter namespaces model ids by
- * author, hence the prefix; it is the same model behind the same words.
+ * Anthropic defaults to Claude. OpenRouter defaults to Gemini 2.5 Flash, a
+ * cheap, fast model that is plenty for short grounded answers, at about $0.30
+ * per million input tokens and $2.50 per million output on OpenRouter when this
+ * was set. A workspace can name any OpenRouter model id instead.
  */
 export const AI_PROVIDERS: readonly ProviderSpec[] = [
   {
@@ -37,7 +39,7 @@ export const AI_PROVIDERS: readonly ProviderSpec[] = [
   {
     id: "OPENROUTER",
     label: "OpenRouter",
-    defaultModel: "anthropic/claude-opus-5",
+    defaultModel: "google/gemini-2.5-flash",
     consoleUrl: "https://openrouter.ai/keys",
     keyPlaceholder: "sk-or-v1-...",
   },

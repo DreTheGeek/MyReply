@@ -65,9 +65,30 @@ export interface AiMessage {
   providerContent?: unknown;
 }
 
+/** What one provider call consumed, as the provider reported it. */
+export interface AiUsage {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  /**
+   * What the call cost, in millionths of a US dollar, when the provider says.
+   * OpenRouter returns it on every response (usage.cost, in credits, which are
+   * dollars). Anthropic returns tokens only, so its cost stays null rather
+   * than estimated from a price list that drifts.
+   */
+  costMicros: number | null;
+}
+
 export interface AiTurn {
   message: AiMessage;
   stopReason: string;
+  /** Absent when the caller built the turn itself (tests, replays). */
+  usage?: AiUsage | null;
+}
+
+function readCount(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.round(value)
+    : null;
 }
 
 /**
@@ -197,6 +218,13 @@ function parseAnthropicTurn(payload: unknown): AiTurn {
       providerContent: blocks,
     },
     stopReason: String(record.stop_reason ?? "end_turn"),
+    usage: record.usage
+      ? {
+          inputTokens: readCount(toRecord(record.usage).input_tokens),
+          outputTokens: readCount(toRecord(record.usage).output_tokens),
+          costMicros: null,
+        }
+      : null,
   };
 }
 
@@ -288,6 +316,17 @@ function parseOpenRouterTurn(payload: unknown): AiTurn {
       toolResults: [],
     },
     stopReason: String(choice.finish_reason ?? "stop"),
+    usage: record.usage
+      ? (() => {
+          const usage = toRecord(record.usage);
+          const cost = typeof usage.cost === "number" && Number.isFinite(usage.cost) ? usage.cost : null;
+          return {
+            inputTokens: readCount(usage.prompt_tokens),
+            outputTokens: readCount(usage.completion_tokens),
+            costMicros: cost === null ? null : Math.round(cost * 1_000_000),
+          };
+        })()
+      : null,
   };
 }
 

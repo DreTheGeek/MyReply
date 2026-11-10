@@ -810,6 +810,13 @@ model AssistantAnswer {
   verdict            AnswerVerdict?
   /// The corrected answer a human supplied. Fed back as a MANUAL source.
   correction         String?
+  /// The model that wrote the answer, and what the call consumed. Null when no
+  /// model was called (a decline before generation) or the provider did not
+  /// say. Cost is in millionths of a dollar, so money is never a float.
+  model              String?
+  inputTokens        Int?
+  outputTokens       Int?
+  costMicros         Int?
   createdAt          DateTime       @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)

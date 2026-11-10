@@ -517,6 +517,36 @@ describe("answerInboundMessage threshold", () => {
     expect(written.confidence).toBeGreaterThanOrEqual(0.6);
   });
 
+  it("records the model and what the reply consumed, with no invented cost", async () => {
+    const reply = anthropicToolReply({
+      can_answer: true,
+      answer:
+        "Standard shipping to the United Kingdom takes 3 working days and costs 4 pounds.",
+      sources: ["chunk_1"],
+    });
+    const body = await reply.json();
+    const withUsage = {
+      ok: true,
+      json: async () => ({ ...body, usage: { input_tokens: 812, output_tokens: 64 } }),
+    } as unknown as Response;
+
+    await answerInboundMessage(
+      baseInput({
+        send: vi.fn(async () => {}),
+        settings: settings({ disclosure: "" }),
+        fetchImpl: fetchReturning(withUsage),
+      }) as never
+    );
+
+    const written = mockPrisma.assistantAnswer.create.mock.calls[0][0].data;
+    expect(written).toMatchObject({
+      model: "claude-opus-5",
+      inputTokens: 812,
+      outputTokens: 64,
+      costMicros: null,
+    });
+  });
+
   it("appends the disclosure to what is sent but not to what is stored", async () => {
     const send = vi.fn(async (_text: string) => {});
 

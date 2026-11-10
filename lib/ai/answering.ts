@@ -36,7 +36,7 @@
  */
 
 import type { AiMessage } from "@/lib/ai/client";
-import { callProvider, ProviderError, type FetchLike } from "@/lib/ai/client";
+import { callProvider, ProviderError, type AiUsage, type FetchLike } from "@/lib/ai/client";
 import type { AiProviderId } from "@/lib/ai/providers";
 import { getWorkspaceAiCredential, touchWorkspaceAiKey } from "@/lib/ai/workspace-key";
 import {
@@ -304,6 +304,8 @@ export interface GeneratedAnswer {
   /** Only ids that were genuinely in the context. A hallucinated id is dropped. */
   citedChunkIds: string[];
   usedChunks: RetrievedChunk[];
+  /** What the call consumed, for the per-reply cost record. */
+  usage: AiUsage | null;
 }
 
 /**
@@ -366,6 +368,7 @@ export async function generateAnswer(
       },
       citedChunkIds: [],
       usedChunks: chunks,
+      usage: turn.usage ?? null,
     };
   }
 
@@ -394,6 +397,7 @@ export async function generateAnswer(
     breakdown,
     citedChunkIds,
     usedChunks: citedChunkIds.length > 0 ? scoredAgainst : chunks,
+    usage: turn.usage ?? null,
   };
 }
 
@@ -571,6 +575,8 @@ export async function answerInboundMessage(
   if (generated.answer === null) {
     const answerId = await recordAnswer({
       input,
+      model: credential.model,
+      usage: generated.usage,
       question,
       answer:
         "The assistant could not answer this from the knowledge base and did not reply.",
@@ -588,6 +594,8 @@ export async function answerInboundMessage(
   if (generated.confidence < settings.confidenceThreshold) {
     const answerId = await recordAnswer({
       input,
+      model: credential.model,
+      usage: generated.usage,
       question,
       answer: generated.answer,
       confidence: generated.confidence,
@@ -617,6 +625,8 @@ export async function answerInboundMessage(
     });
     const answerId = await recordAnswer({
       input,
+      model: credential.model,
+      usage: generated.usage,
       question,
       answer: generated.answer,
       confidence: generated.confidence,
@@ -632,6 +642,8 @@ export async function answerInboundMessage(
 
   const answerId = await recordAnswer({
     input,
+      model: credential.model,
+      usage: generated.usage,
     question,
     answer: generated.answer,
     confidence: generated.confidence,
@@ -647,6 +659,9 @@ interface RecordAnswerInput {
   answer: string;
   confidence: number;
   handedOff: boolean;
+  /** Set once a model was actually called, so its cost is on the record. */
+  model?: string;
+  usage?: AiUsage | null;
 }
 
 async function recordAnswer(record: RecordAnswerInput): Promise<string> {
@@ -659,6 +674,10 @@ async function recordAnswer(record: RecordAnswerInput): Promise<string> {
       answer: record.answer,
       confidence: record.confidence,
       handedOff: record.handedOff,
+      model: record.model ?? null,
+      inputTokens: record.usage?.inputTokens ?? null,
+      outputTokens: record.usage?.outputTokens ?? null,
+      costMicros: record.usage?.costMicros ?? null,
     },
     select: { id: true },
   });

@@ -234,7 +234,7 @@ describe("workspace key storage", () => {
       apiKey: FAKE_KEY,
     });
     const args = mockPrisma.workspaceAiCredential.upsert.mock.calls[0][0];
-    expect(args.create.model).toBe("anthropic/claude-opus-5");
+    expect(args.create.model).toBe("google/gemini-2.5-flash");
   });
 
   it("reports an unconfigured workspace rather than throwing", async () => {
@@ -407,7 +407,7 @@ describe("POST /api/workspace/ai-key", () => {
     await post({ provider: "OPENROUTER", apiKey: FAKE_KEY });
     expect(mockValidate).toHaveBeenCalledWith(
       "OPENROUTER",
-      "anthropic/claude-opus-5",
+      "google/gemini-2.5-flash",
       FAKE_KEY
     );
   });
