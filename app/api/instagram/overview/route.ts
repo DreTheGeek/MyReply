@@ -103,8 +103,6 @@ export interface OverviewResponse {
     interactions: number;
   };
   posts: OverviewPost[];
-  provider?: "META" | "ZERNIO";
-  limitations?: string[];
 }
 
 function isVideoLike(media: InstagramMedia): boolean {
@@ -154,9 +152,7 @@ export async function GET(request: NextRequest) {
       : Math.min(requestedCount as number, MAX_POSTS);
 
     const media = await getAllUserMedia({ context: accessToken, max: target });
-    const truncated =
-      media.length >= MAX_POSTS ||
-      (account.provider === "ZERNIO" && media.length >= 25);
+    const truncated = media.length >= MAX_POSTS;
 
     // Likes and comments come free with basic media fields. Views / reach /
     // saved / shares require the insights permission, so fetch them per media
@@ -291,14 +287,6 @@ export async function GET(request: NextRequest) {
       account: { id: account.id, username: account.username },
       accounts,
       requestedCount,
-      provider: account.provider,
-      limitations:
-        account.provider === "ZERNIO"
-          ? [
-              "Post reporting covers the 25 most recent Instagram posts.",
-              "Insights and follower history require the Zernio Analytics add-on and reflect its last sync. Missing metrics remain unavailable.",
-            ]
-          : [],
       truncated,
       insightsAvailable: insightsAvailable && !permissionDenied,
       followers,

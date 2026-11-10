@@ -1,100 +1,33 @@
-import { createHash, randomUUID } from "node:crypto";
 import * as meta from "@/lib/meta/client";
-import {
-  zernioRequest,
-  ZernioApiError,
-  ZernioDeliveryUnconfirmedError,
-} from "@/lib/zernio/client";
 import type { QuickReply } from "@/lib/meta/quick-replies";
-import type { InstagramContext, ZernioContext } from "./context";
+import type { InstagramContext } from "./context";
 
-type Button =
-  | { type: "url"; title: string; url: string }
-  | { type: "postback"; title: string; payload: string };
+type SendResult = { recipient_id?: string; message_id: string };
 
-async function sendZernioMessage({
-  context,
-  recipientId,
-  commentId,
-  postId,
-  text,
-  buttons,
-}: {
-  context: ZernioContext;
-  recipientId?: string;
-  commentId?: string;
-  postId?: string;
-  text: string;
-  buttons?: Button[];
-}) {
-  const path = commentId
-    ? `/inbox/comments/${encodeURIComponent(postId ?? commentId)}/${encodeURIComponent(commentId)}/private-reply`
-    : `/inbox/conversations/${encodeURIComponent(recipientId!)}/messages`;
-  const body = {
-    accountId: context.accountId,
-    message: buttons ? text.slice(0, 640) : text,
-    ...(buttons ? { buttons } : {}),
-  };
-  const idempotencyKey = createHash("sha256")
-    .update(
-      JSON.stringify({
-        operationId: context.operationId ?? randomUUID(),
-        path,
-        body,
-      })
-    )
-    .digest("hex");
-  const result = await zernioRequest<{
-    messageId?: string;
-    data?: { messageId: string };
-  }>({
-    apiKey: context.apiKey,
-    path,
-    method: "POST",
-    body,
-    ...(commentId ? {} : { idempotencyKey }),
-  }).catch((error: unknown) => {
-    // A send may have succeeded upstream before a network/5xx failure. The
-    // service releases idempotency claims on non-2xx, so do not auto-resend.
-    if (error instanceof ZernioApiError && error.code >= 500)
-      throw new ZernioDeliveryUnconfirmedError();
-    throw error;
-  });
-  const messageId = result?.messageId ?? result?.data?.messageId;
-  if (!messageId) throw new ZernioDeliveryUnconfirmedError();
-  return {
-    message_id: messageId,
-    ...(recipientId ? { recipient_id: recipientId } : {}),
-  };
-}
-
-function linkButtons(buttons: meta.LinkButton[]): Button[] {
-  return buttons
-    .slice(0, 3)
-    .map(({ title, url }) => ({ type: "url", title: title.slice(0, 20), url }));
-}
+/**
+ * Comment sends take the post id as well, because a relay provider once
+ * addressed a comment by post and comment together. Meta needs only the
+ * comment id, so it is accepted and ignored until the call sites move onto
+ * the channel adapter.
+ */
+type CommentTarget = { commentId: string; postId?: string };
 
 export async function sendPrivateReply({
   context,
   instagramAccountId,
   commentId,
   message,
-  postId,
-}: {
+}: CommentTarget & {
   context: InstagramContext;
   instagramAccountId: string;
-  commentId: string;
   message: string;
-  postId?: string;
-}) {
-  if (context.provider === "META")
-    return meta.sendPrivateReply(
-      context.accessToken,
-      instagramAccountId,
-      commentId,
-      message
-    );
-  return sendZernioMessage({ context, commentId, postId, text: message });
+}): Promise<SendResult> {
+  return meta.sendPrivateReply(
+    context.accessToken,
+    instagramAccountId,
+    commentId,
+    message
+  );
 }
 
 export async function sendPrivateReplyWithButton({
@@ -104,32 +37,21 @@ export async function sendPrivateReplyWithButton({
   text,
   buttonTitle,
   payload,
-  postId,
-}: {
+}: CommentTarget & {
   context: InstagramContext;
   instagramAccountId: string;
-  commentId: string;
   text: string;
   buttonTitle: string;
   payload: string;
-  postId?: string;
-}) {
-  if (context.provider === "META")
-    return meta.sendPrivateReplyWithButton(
-      context.accessToken,
-      instagramAccountId,
-      commentId,
-      text,
-      buttonTitle,
-      payload
-    );
-  return sendZernioMessage({
-    context,
+}): Promise<SendResult> {
+  return meta.sendPrivateReplyWithButton(
+    context.accessToken,
+    instagramAccountId,
     commentId,
-    postId,
-    text: text,
-    buttons: [{ type: "postback", title: buttonTitle.slice(0, 20), payload }],
-  });
+    text,
+    buttonTitle,
+    payload
+  );
 }
 
 export async function sendDirectMessageWithButton({
@@ -146,22 +68,15 @@ export async function sendDirectMessageWithButton({
   text: string;
   buttonTitle: string;
   payload: string;
-}) {
-  if (context.provider === "META")
-    return meta.sendDirectMessageWithButton(
-      context.accessToken,
-      instagramAccountId,
-      userId,
-      text,
-      buttonTitle,
-      payload
-    );
-  return sendZernioMessage({
-    context,
-    recipientId: userId,
-    text: text,
-    buttons: [{ type: "postback", title: buttonTitle.slice(0, 20), payload }],
-  });
+}): Promise<SendResult> {
+  return meta.sendDirectMessageWithButton(
+    context.accessToken,
+    instagramAccountId,
+    userId,
+    text,
+    buttonTitle,
+    payload
+  );
 }
 
 export async function sendPrivateReplyWithLinkButton({
@@ -170,30 +85,19 @@ export async function sendPrivateReplyWithLinkButton({
   commentId,
   text,
   buttons,
-  postId,
-}: {
+}: CommentTarget & {
   context: InstagramContext;
   instagramAccountId: string;
-  commentId: string;
   text: string;
   buttons: meta.LinkButton[];
-  postId?: string;
-}) {
-  if (context.provider === "META")
-    return meta.sendPrivateReplyWithLinkButton(
-      context.accessToken,
-      instagramAccountId,
-      commentId,
-      text,
-      buttons
-    );
-  return sendZernioMessage({
-    context,
+}): Promise<SendResult> {
+  return meta.sendPrivateReplyWithLinkButton(
+    context.accessToken,
+    instagramAccountId,
     commentId,
-    postId,
-    text: text,
-    buttons: linkButtons(buttons),
-  });
+    text,
+    buttons
+  );
 }
 
 export async function sendDirectMessage({
@@ -206,15 +110,13 @@ export async function sendDirectMessage({
   instagramAccountId: string;
   userId: string;
   message: string;
-}) {
-  if (context.provider === "META")
-    return meta.sendDirectMessage(
-      context.accessToken,
-      instagramAccountId,
-      userId,
-      message
-    );
-  return sendZernioMessage({ context, recipientId: userId, text: message });
+}): Promise<SendResult> {
+  return meta.sendDirectMessage(
+    context.accessToken,
+    instagramAccountId,
+    userId,
+    message
+  );
 }
 
 export async function sendDirectMessageWithLinkButton({
@@ -229,55 +131,28 @@ export async function sendDirectMessageWithLinkButton({
   userId: string;
   text: string;
   buttons: meta.LinkButton[];
-}) {
-  if (context.provider === "META")
-    return meta.sendDirectMessageWithLinkButton(
-      context.accessToken,
-      instagramAccountId,
-      userId,
-      text,
-      buttons
-    );
-  return sendZernioMessage({
-    context,
-    recipientId: userId,
-    text: text,
-    buttons: linkButtons(buttons),
-  });
+}): Promise<SendResult> {
+  return meta.sendDirectMessageWithLinkButton(
+    context.accessToken,
+    instagramAccountId,
+    userId,
+    text,
+    buttons
+  );
 }
 
 export async function sendCommentReply({
   context,
   commentId,
   message,
-  postId,
-}: {
+}: CommentTarget & {
   context: InstagramContext;
-  commentId: string;
   message: string;
-  postId?: string;
-}) {
-  if (context.provider === "META")
-    return meta.sendCommentReply(context.accessToken, commentId, message);
-  const result = await zernioRequest<{ data: { commentId: string } }>({
-    apiKey: context.apiKey,
-    path: `/inbox/comments/${encodeURIComponent(postId ?? commentId)}`,
-    method: "POST",
-    body: { accountId: context.accountId, commentId, message },
-  }).catch((error: unknown) => {
-    if (error instanceof ZernioApiError && error.code >= 500) throw new ZernioDeliveryUnconfirmedError();
-    throw error;
-  });
-  if (!result?.data?.commentId) throw new ZernioDeliveryUnconfirmedError();
-  return { id: result.data.commentId };
+}): Promise<{ id: string }> {
+  return meta.sendCommentReply(context.accessToken, commentId, message);
 }
 
-/**
- * A text DM carrying tappable quick replies.
- *
- * Zernio has no quick reply field, so through Zernio the text goes out on its
- * own. The recipient still gets the message; they lose only the shortcuts.
- */
+/** A text DM carrying tappable quick replies. */
 export async function sendDirectMessageWithQuickReplies({
   context,
   instagramAccountId,
@@ -290,52 +165,39 @@ export async function sendDirectMessageWithQuickReplies({
   userId: string;
   text: string;
   quickReplies: QuickReply[];
-}): Promise<{ recipient_id?: string; message_id: string }> {
-  if (context.provider === "META")
-    return meta.sendDirectMessageWithQuickReplies(
-      context.accessToken,
-      instagramAccountId,
-      userId,
-      text,
-      quickReplies
-    );
-  return sendZernioMessage({ context, recipientId: userId, text });
+}): Promise<SendResult> {
+  return meta.sendDirectMessageWithQuickReplies(
+    context.accessToken,
+    instagramAccountId,
+    userId,
+    text,
+    quickReplies
+  );
 }
 
-/** A private reply to a comment, carrying quick replies. See above for Zernio. */
+/** A private reply to a comment, carrying quick replies. */
 export async function sendPrivateReplyWithQuickReplies({
   context,
   instagramAccountId,
   commentId,
   text,
   quickReplies,
-  postId,
-}: {
+}: CommentTarget & {
   context: InstagramContext;
   instagramAccountId: string;
-  commentId: string;
   text: string;
   quickReplies: QuickReply[];
-  postId?: string;
-}): Promise<{ recipient_id?: string; message_id: string }> {
-  if (context.provider === "META")
-    return meta.sendPrivateReplyWithQuickReplies(
-      context.accessToken,
-      instagramAccountId,
-      commentId,
-      text,
-      quickReplies
-    );
-  return sendZernioMessage({ context, commentId, postId, text });
+}): Promise<SendResult> {
+  return meta.sendPrivateReplyWithQuickReplies(
+    context.accessToken,
+    instagramAccountId,
+    commentId,
+    text,
+    quickReplies
+  );
 }
 
-/**
- * An image, video, audio or file DM by public URL.
- *
- * Meta only. Zernio exposes no attachment send, so this throws and the caller,
- * which treats an attachment as a best-effort extra after the real message,
- * logs it and carries on.
- */
+/** An image, video, audio or file DM by public URL. */
 export async function sendAttachment({
   context,
   instagramAccountId,
@@ -349,15 +211,13 @@ export async function sendAttachment({
   attachmentUrl: string;
   type: meta.AttachmentType;
 }): Promise<{ recipient_id: string; message_id: string }> {
-  if (context.provider === "META")
-    return meta.sendAttachment(
-      context.accessToken,
-      instagramAccountId,
-      userId,
-      attachmentUrl,
-      type
-    );
-  throw new Error("Attachments are not supported through Zernio");
+  return meta.sendAttachment(
+    context.accessToken,
+    instagramAccountId,
+    userId,
+    attachmentUrl,
+    type
+  );
 }
 
 export { inferAttachmentType } from "@/lib/meta/client";

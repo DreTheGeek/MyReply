@@ -3,10 +3,6 @@ import {
   RateLimitError,
   TokenExpiredError,
 } from "@/lib/meta/client";
-import {
-  ZernioApiError,
-  ZernioDeliveryUnconfirmedError,
-} from "@/lib/zernio/client";
 
 export class DeliveryUnconfirmedError extends Error {
   constructor(error: unknown) {
@@ -21,11 +17,8 @@ export class DeliveryUnconfirmedError extends Error {
 
 export function isDeliveryUnconfirmed(
   error: unknown,
-): error is DeliveryUnconfirmedError | ZernioDeliveryUnconfirmedError {
-  return (
-    error instanceof DeliveryUnconfirmedError ||
-    error instanceof ZernioDeliveryUnconfirmedError
-  );
+): error is DeliveryUnconfirmedError {
+  return error instanceof DeliveryUnconfirmedError;
 }
 
 // Only explicit rejections prove that no message was delivered. Meta code 1,
@@ -33,8 +26,6 @@ export function isDeliveryUnconfirmed(
 export function isConfirmedSendRejection(error: unknown): boolean {
   if (error instanceof RateLimitError || error instanceof TokenExpiredError)
     return true;
-  if (error instanceof ZernioApiError)
-    return error.code >= 400 && error.code < 500;
   return (
     error instanceof MetaApiError && [10, 100, 200, 551].includes(error.code)
   );

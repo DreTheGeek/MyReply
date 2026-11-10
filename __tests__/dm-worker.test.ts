@@ -18,7 +18,6 @@ const {
   mockReleaseWorkspaceDMReservation,
 } = vi.hoisted(() => ({
   mockPrisma: {
-    zernioConnection: { findUnique: vi.fn() },
     postbackDelivery: { create: vi.fn(), delete: vi.fn() },
     automation: {
       findMany: vi.fn(),
@@ -1401,87 +1400,16 @@ describe("DM Worker, a person who said stop", () => {
     );
   });
 });
-describe("Zernio worker routing", () => {
-  it("fails open on unknown follow status and sends once through the selected provider", async () => {
-    mockPrisma.zernioConnection.findUnique.mockResolvedValue({
-      apiKey: "encrypted_key",
-    });
-    mockPrisma.automation.findMany.mockResolvedValue([
-      {
-        ...mockAutomation,
-        requireFollow: true,
-        instagramAccount: {
-          ...mockAutomation.instagramAccount,
-          provider: "ZERNIO",
-          workspaceId: "workspace_123",
-          zernioAccountId: "zernio_selected",
-          accessToken: "",
-        },
-      },
-    ]);
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            isFollower: null,
-            unavailableReason: "consent_required",
-          })
-        )
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ messageId: "sent" }))
-      );
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      await getProcessor()(createMockJob());
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect(fetchMock.mock.calls[1][0]).toContain(
-        "/inbox/comments/media_101/comment_555/private-reply"
-      );
-      expect(JSON.parse(fetchMock.mock.calls[1][1].body).accountId).toBe(
-        "zernio_selected"
-      );
-      expect(mockSendPrivateReply).not.toHaveBeenCalled();
-      expect(mockSendPrivateReplyWithButton).not.toHaveBeenCalled();
-      expect(mockPrisma.dmLog.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({ status: "SENT" }),
-        })
-      );
-    } finally {
-      vi.unstubAllGlobals();
-    }
+it("stops BullMQ retries after an ambiguous direct-message outcome", async () => {
+  mockPrisma.automation.findFirst.mockResolvedValue(mockAutomation);
+  // A dropped connection after the request left says nothing about whether
+  // Instagram delivered it, so this must never be retried automatically.
+  mockSendDirectMessage.mockRejectedValueOnce(new Error("connection reset"));
+  await expect(getProcessor()(createMockPostbackJob())).rejects.toMatchObject({
+    name: "UnrecoverableError",
+    message: expect.stringContaining("Inspect the Instagram inbox"),
   });
-});
-
-it("stops BullMQ retries after an ambiguous Zernio direct-message outcome", async () => {
-  mockPrisma.zernioConnection.findUnique.mockResolvedValue({
-    apiKey: "encrypted",
-  });
-  mockPrisma.automation.findFirst.mockResolvedValue({
-    ...mockAutomation,
-    instagramAccount: {
-      ...mockAutomation.instagramAccount,
-      provider: "ZERNIO",
-      workspaceId: "workspace_123",
-      zernioAccountId: "remote",
-      accessToken: "",
-    },
-  });
-  const fetchMock = vi.fn().mockRejectedValue(new Error("connection reset"));
-  vi.stubGlobal("fetch", fetchMock);
-  try {
-    await expect(getProcessor()(createMockPostbackJob())).rejects.toMatchObject(
-      {
-        name: "UnrecoverableError",
-        message: expect.stringContaining("Inspect the Instagram inbox"),
-      }
-    );
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  } finally {
-    vi.unstubAllGlobals();
-  }
+  expect(mockSendDirectMessage).toHaveBeenCalledTimes(1);
 });
 
 it('binds queued comments to the local connection that received them', async () => {
@@ -1507,8 +1435,7 @@ it('keeps an unconfirmed public reply untouched after the DM was delivered', asy
   expect(mockPrisma.dmLog.update).not.toHaveBeenCalled();
 });
 
-describe("durable Zernio postback delivery", () => {
-  let fetchMock: ReturnType<typeof vi.fn>;
+describe("durable postback delivery", () => {
   beforeEach(() => {
     const claims = new Set<string>();
     mockPrisma.postbackDelivery.create.mockImplementation(
@@ -1523,20 +1450,8 @@ describe("durable Zernio postback delivery", () => {
         claims.delete(where.id);
       },
     );
-    mockPrisma.zernioConnection.findUnique.mockResolvedValue({
-      apiKey: "encrypted",
-    });
-    mockPrisma.automation.findFirst.mockResolvedValue({
-      ...mockAutomation,
-      instagramAccount: {
-        ...mockAutomation.instagramAccount,
-        provider: "ZERNIO",
-        workspaceId: "workspace_123",
-        zernioAccountId: "remote",
-        accessToken: "",
-      },
-    });
-    fetchMock = vi.fn();
+    mockPrisma.automation.findFirst.mockResolvedValue(mockAutomation);
+    mockSendDirectMessage.mockResolvedValue({ recipient_id: "commenter_999", message_id: "sent" });
   });
 
   function tap(mid: string) {
@@ -1549,121 +1464,65 @@ describe("durable Zernio postback delivery", () => {
   }
 
   it("retains an uncertain tap across a newer successful tap and queue eviction", async () => {
-    fetchMock
-      .mockImplementation(
-        async () =>
-          new Response(JSON.stringify({ data: { messageId: "new-tap" } })),
-      )
-      .mockRejectedValueOnce(new Error("connection reset"));
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      const process = getProcessor();
-      await expect(process(tap("old"))).rejects.toMatchObject({
-        name: "UnrecoverableError",
-      });
-      await process(tap("new"));
-      await process({ ...tap("old"), id: "redelivery-job" });
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect(mockPrisma.postbackDelivery.delete).not.toHaveBeenCalled();
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    mockSendDirectMessage.mockRejectedValueOnce(new Error("connection reset"));
+    const process = getProcessor();
+    await expect(process(tap("old"))).rejects.toMatchObject({
+      name: "UnrecoverableError",
+    });
+    await process(tap("new"));
+    await process({ ...tap("old"), id: "redelivery-job" });
+    expect(mockSendDirectMessage).toHaveBeenCalledTimes(2);
+    expect(mockPrisma.postbackDelivery.delete).not.toHaveBeenCalled();
   });
 
   it("deduplicates successful old taps while permitting each distinct new mid", async () => {
-    fetchMock.mockImplementation(
-      async () => new Response(JSON.stringify({ data: { messageId: "sent" } })),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      const process = getProcessor();
-      await process(tap("first"));
-      await process(tap("second"));
-      await process({ ...tap("first"), id: "after-retention" });
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect(mockReleaseWorkspaceDMReservation).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    const process = getProcessor();
+    await process(tap("first"));
+    await process(tap("second"));
+    await process({ ...tap("first"), id: "after-retention" });
+    expect(mockSendDirectMessage).toHaveBeenCalledTimes(2);
+    expect(mockReleaseWorkspaceDMReservation).toHaveBeenCalledTimes(1);
   });
 
   it("releases a claim on a confirmed rejection so the same tap can retry", async () => {
-    fetchMock
-      .mockResolvedValueOnce(new Response("{}", { status: 429 }))
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ data: { messageId: "sent" } })),
-      );
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      const process = getProcessor();
-      await expect(process(tap("retry"))).rejects.toThrow();
-      await process(tap("retry"));
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect(mockPrisma.postbackDelivery.delete).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    mockSendDirectMessage.mockRejectedValueOnce(new RateLimitError("rate limited"));
+    const process = getProcessor();
+    await expect(process(tap("retry"))).rejects.toThrow();
+    await process(tap("retry"));
+    expect(mockSendDirectMessage).toHaveBeenCalledTimes(2);
+    expect(mockPrisma.postbackDelivery.delete).toHaveBeenCalledTimes(1);
   });
+
   it("claims concurrent deliveries of the same tap before either can send twice", async () => {
-    fetchMock.mockImplementation(
-      async () => new Response(JSON.stringify({ data: { messageId: "sent" } })),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      const process = getProcessor();
-      await Promise.all([
-        process(tap("concurrent")),
-        process({ ...tap("concurrent"), id: "other-job" }),
-      ]);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    const process = getProcessor();
+    await Promise.all([
+      process(tap("concurrent")),
+      process({ ...tap("concurrent"), id: "other-job" }),
+    ]);
+    expect(mockSendDirectMessage).toHaveBeenCalledTimes(1);
   });
 
   it("deduplicates follow-gate prompts as well as reveal messages", async () => {
     mockPrisma.automation.findFirst.mockResolvedValue({
       ...mockAutomation,
       requireFollow: true,
-      instagramAccount: {
-        ...mockAutomation.instagramAccount,
-        provider: "ZERNIO",
-        workspaceId: "workspace_123",
-        zernioAccountId: "remote",
-        accessToken: "",
-      },
     });
-    fetchMock.mockImplementation(
-      async (_url: string, init: { method: string }) =>
-        new Response(
-          JSON.stringify(
-            init.method === "GET"
-              ? { isFollower: false }
-              : { data: { messageId: "prompt" } },
-          ),
-        ),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-    try {
-      const process = getProcessor();
-      const followTap = tap("follow");
-      // The prompt goes out on the last delayed re-check, an earlier false
-      // only queues the next one, so exercise that pass: that is where the
-      // prompt is sent, and where a redelivery must not send it a second time.
-      followTap.data = {
-        ...followTap.data,
-        payload: "followcheck:auto_789",
-        followRecheck: true,
-        followRecheckAttempt: 2,
-      };
-      await process(followTap);
-      await process({ ...followTap, id: "redelivery" });
-      expect(
-        fetchMock.mock.calls.filter(([, init]) => init.method === "POST"),
-      ).toHaveLength(1);
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    mockGetUserFollowStatus.mockResolvedValue(false);
+    mockSendDirectMessageWithButton.mockResolvedValue({ recipient_id: "commenter_999", message_id: "prompt" });
+    const process = getProcessor();
+    const followTap = tap("follow");
+    // The prompt goes out on the last delayed re-check (an earlier false only
+    // queues the next one), so exercise that pass: that is where the prompt is
+    // sent, and where a redelivery must not send it a second time.
+    followTap.data = {
+      ...followTap.data,
+      payload: "followcheck:auto_789",
+      followRecheck: true,
+      followRecheckAttempt: 2,
+    };
+    await process(followTap);
+    await process({ ...followTap, id: "redelivery" });
+    expect(mockSendDirectMessageWithButton).toHaveBeenCalledTimes(1);
   });
 });
 

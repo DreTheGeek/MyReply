@@ -26,7 +26,7 @@ import {
   recordOutboundMessageSeen,
   upsertContact,
 } from "@/lib/contacts";
-import { Prisma, type InstagramProvider } from "@/app/generated/prisma/client";
+import { Prisma } from "@/app/generated/prisma/client";
 
 const OPENING_DM_READ_FALLBACK_DELAY_MS = 5 * 60 * 1000;
 
@@ -221,11 +221,9 @@ async function recordMention(
 /**
  * Turn one verified Instagram webhook payload into queued work.
  *
- * Shared by every way an Instagram event can arrive: Meta's own webhook, and
- * any provider that relays Meta-shaped payloads. Only entries for accounts
- * connected through `provider` (and, when given, inside `workspaceId`) are
- * kept, so a relay for one workspace can never enqueue work for another, and
- * a payload naming no known account writes nothing at all.
+ * Only entries for connected accounts (and, when given, inside `workspaceId`)
+ * are kept, so a payload naming no known account writes nothing at all and a
+ * caller scoped to one workspace can never enqueue work for another.
  *
  * Throws after marking the WebhookEvent FAILED, so the caller can answer
  * non-2xx and the sender retries. Every job id below is deterministic, which
@@ -233,11 +231,9 @@ async function recordMention(
  */
 export async function processInstagramWebhook({
   payload: incoming,
-  provider,
   workspaceId,
 }: {
   payload: InstagramPayload;
-  provider: InstagramProvider;
   workspaceId?: string;
 }): Promise<void> {
   if (incoming.object !== "instagram" || !Array.isArray(incoming.entry)) return;
@@ -245,7 +241,6 @@ export async function processInstagramWebhook({
   const accounts = await prisma.instagramAccount.findMany({
     where: {
       instagramId: { in: incoming.entry.map((entry) => entry.id) },
-      provider,
       ...(workspaceId ? { workspaceId } : {}),
     },
     select: { id: true, instagramId: true, workspaceId: true },

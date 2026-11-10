@@ -1,52 +1,27 @@
 import { decryptToken } from "@/lib/meta/oauth";
-import { prisma } from "@/lib/db/client";
 
-export type InstagramContext =
-  | { provider: "META"; accessToken: string }
-  | {
-      provider: "ZERNIO";
-      apiKey: string;
-      accountId: string;
-      instagramId: string;
-      operationId?: string;
-    };
+/**
+ * What a send or a read needs to act as one connected Instagram account: the
+ * decrypted Graph API token. Built per job from the stored ciphertext and never
+ * persisted or logged.
+ */
+export type InstagramContext = { accessToken: string };
 
-export type ProviderAccount = {
-  provider: "META" | "ZERNIO";
-  workspaceId: string;
-  zernioAccountId: string | null;
-  instagramId: string;
-  accessToken: string;
-};
+/** The stored account fields a context is built from. */
+export type ProviderAccount = { accessToken: string };
 
 export function hasInstagramCredentials(
-  account: Pick<ProviderAccount, "provider" | "accessToken" | "zernioAccountId">
-) {
-  return account.provider === "ZERNIO"
-    ? Boolean(account.zernioAccountId)
-    : Boolean(account.accessToken);
+  account: Pick<ProviderAccount, "accessToken">
+): boolean {
+  return Boolean(account.accessToken);
 }
 
+/**
+ * Decrypt the account's token into a context. Throws when the ciphertext does
+ * not decrypt, which callers record as a decrypt failure.
+ */
 export async function createInstagramContext(
-  account: ProviderAccount,
-  operationId?: string
+  account: Pick<ProviderAccount, "accessToken">
 ): Promise<InstagramContext> {
-  if (account.provider !== "ZERNIO")
-    return { provider: "META", accessToken: decryptToken(account.accessToken) };
-  if (!account.zernioAccountId)
-    throw new Error("Zernio account is not connected");
-  const connection = await prisma.zernioConnection.findUnique({
-    where: { workspaceId: account.workspaceId },
-    select: { apiKey: true },
-  });
-  if (!connection) throw new Error("Zernio workspace connection is missing");
-  return {
-    provider: "ZERNIO",
-    apiKey: decryptToken(connection.apiKey),
-    accountId: account.zernioAccountId,
-    instagramId: account.instagramId,
-    ...(operationId ? { operationId } : {}),
-  };
+  return { accessToken: decryptToken(account.accessToken) };
 }
-
-export type ZernioContext = Extract<InstagramContext, { provider: "ZERNIO" }>;

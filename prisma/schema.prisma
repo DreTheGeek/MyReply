@@ -152,7 +152,6 @@ model Workspace {
   usagePeriodStart  DateTime @default(now())
   dmsSentThisPeriod Int      @default(0)
 
-  zernioConnection  ZernioConnection?
   members           WorkspaceMember[]
   invitations       WorkspaceInvitation[]
   instagramAccounts InstagramAccount[]
@@ -308,8 +307,6 @@ model InstagramAccount {
   instagramId       String    @unique
   username          String
   name              String?
-  provider          InstagramProvider @default(META)
-  zernioAccountId   String?
   accessToken       String
   tokenExpiresAt    DateTime?
   webhookSubscribed Boolean   @default(false)
@@ -1099,22 +1096,6 @@ enum ConversionSource {
   SQUARE
   WEBHOOK
   MANUAL
-}
-
-enum InstagramProvider {
-  META
-  ZERNIO
-}
-
-model ZernioConnection {
-  workspaceId    String @id
-  apiKey         String
-  profileId      String?
-  webhookId      String?
-  webhookSecret  String
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 // Claims persist independently of BullMQ retention so old taps never resend.

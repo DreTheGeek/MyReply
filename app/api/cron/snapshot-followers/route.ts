@@ -28,20 +28,13 @@ export async function GET(request: NextRequest) {
   }
 
   const accounts = await prisma.instagramAccount.findMany({
-    where: {
-      OR: [
-        { provider: "META", accessToken: { not: "" } },
-        { provider: "ZERNIO", zernioAccountId: { not: null } },
-      ],
-    },
+    where: { accessToken: { not: "" } },
     select: {
       id: true,
       workspaceId: true,
       username: true,
       instagramId: true,
       accessToken: true,
-      provider: true,
-      zernioAccountId: true,
     },
     // Unbounded and serial, one Meta call each, in a serverless handler on a
     // 120 second pg_cron timeout. At a few hundred accounts it timed out mid
@@ -61,22 +54,6 @@ export async function GET(request: NextRequest) {
   for (const account of accounts) {
     try {
       const token = await createInstagramContext(account);
-      if (token.provider === "ZERNIO") {
-        const imported = await backfillFollowerHistory({
-          instagramAccountId: account.id,
-          accessToken: token,
-          instagramId: account.instagramId,
-          currentFollowers: 0,
-        });
-        backfilled += imported;
-        if (imported === 0)
-          failures.push({
-            username: account.username,
-            reason:
-              "Zernio follower history is unavailable or already stored (Analytics add-on required)",
-          });
-        continue;
-      }
       const info = await getUserInfo({ context: token });
 
       if (typeof info.followers_count !== "number") {

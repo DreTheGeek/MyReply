@@ -2,7 +2,6 @@ import { prisma } from "@/lib/db/client";
 import {
   getFollowerCountSeries,
   getUserInfo,
-  getZernioFollowerSnapshots,
   type FollowerCountPoint,
   type InstagramContext,
 } from "@/lib/instagram/provider";
@@ -102,16 +101,12 @@ export async function backfillFollowerHistory({
 }): Promise<number> {
   let points: { date: string; followers: number }[];
   try {
-    if (accessToken.provider === "ZERNIO") {
-      points = await getZernioFollowerSnapshots(accessToken);
-    } else {
-      const series = await getFollowerCountSeries({
-        context: accessToken,
-        igUserId: instagramId,
-      });
-      if (!series?.length) return 0;
-      points = reconstructFollowerTotals(series, currentFollowers);
-    }
+    const series = await getFollowerCountSeries({
+      context: accessToken,
+      igUserId: instagramId,
+    });
+    if (!series?.length) return 0;
+    points = reconstructFollowerTotals(series, currentFollowers);
   } catch {
     return 0;
   }
@@ -187,16 +182,6 @@ export async function ensureFollowerHistory(
   account: { id: string; instagramId: string },
   accessToken: InstagramContext
 ): Promise<number | null> {
-  if (accessToken.provider === "ZERNIO") {
-    await backfillFollowerHistory({
-      instagramAccountId: account.id,
-      accessToken: accessToken,
-      instagramId: account.instagramId,
-      currentFollowers: 0,
-    });
-    const history = await getFollowerHistory(account.id);
-    return history.at(-1)?.followers ?? null;
-  }
   const info = await getUserInfo({ context: accessToken });
   const followers = info.followers_count;
   if (typeof followers !== "number") return null;

@@ -14,13 +14,11 @@ Someone comments `LINK` on your reel, and OpenReply queues a DM with your link. 
 
 OpenReply is free, MIT-licensed software running on your own infrastructure, with no software seat limits or plan caps. Hosting and optional provider costs are separate.
 
-> **Supported by [Zernio](https://zernio.com/?utm_source=openreply&utm_medium=sponsorship&utm_campaign=openreply-integration&utm_content=readme-sponsor).** An optional paid Instagram connection provider that lets you avoid creating and reviewing your own Meta app. OpenReply still runs your campaigns, queues, logs, and inbox on your infrastructure. [Connect with Zernio](docs/zernio.md), or keep using your own Meta app.
-
 > **OpenReply is self-hosted. You have to deploy your own copy.**
 >
 > [openreply.diwen.dev](https://openreply.diwen.dev) is a demo of the dashboard, not a service you can sign up for. Creating an account there will never send a DM for you, and there is no hosted plan to upgrade to.
 >
-> A working instance needs your deployed fork, a public HTTPS URL, PostgreSQL, Redis, a running worker, and an Instagram connection. Choose optional paid Zernio or your own Meta app. [docs/setup.md](docs/setup.md) walks through all of it.
+> A working instance needs your deployed fork, a public HTTPS URL, PostgreSQL, Redis, a running worker, and your own Meta app. [docs/setup.md](docs/setup.md) walks through all of it.
 
 > If this saves you a subscription or a weekend of building, a star on the repo genuinely helps other people find it.
 
@@ -34,7 +32,7 @@ OpenReply is built around Meta's official Instagram private replies. It does not
 
 - Keyword to DM. Match one or many keywords per post, whole-word or partial.
 - Optional public reply. Post a visible comment reply on top of the DM.
-- DM and Story reply triggers. The same keywords can also fire on an inbound DM, which covers text replies to your Stories, since Instagram delivers those as DMs. That makes `Reply LINK to this Story` work with no post involved. Turn it on per campaign, and subscribe to the `messages` webhook field if you use your own Meta app. Zernio webhook registration is automatic.
+- DM and Story reply triggers. The same keywords can also fire on an inbound DM, which covers text replies to your Stories, since Instagram delivers those as DMs. That makes `Reply LINK to this Story` work with no post involved. Turn it on per campaign, and subscribe to the `messages` webhook field on your Meta app.
 - Tracked links. Swap a link for a tracked redirect and see clicks and CTR per campaign.
 - Two link buttons. Send up to two tappable link buttons in one DM, each a separate tracked link with its own click stats.
 - Follow gate. Optionally require a follow before you hand over the link. The DM asks the commenter to follow and tap a button; on tap, OpenReply checks Meta's `is_user_follow_business` flag and only sends the link once they follow, re-prompting until then. It fails open (sends the link anyway) when Instagram does not return follow status, so a real follower is never trapped.
@@ -52,7 +50,7 @@ OpenReply is built around Meta's official Instagram private replies. It does not
 ## How it works
 
 1. Someone comments on your Instagram post or reel, or DMs you, or replies to your Story.
-2. Your connection provider (direct Meta or Zernio) delivers the event to your OpenReply instance.
+2. Meta delivers the event to your instance's webhook.
 3. OpenReply checks the text against your active campaigns.
 4. On a keyword match, it queues a job.
 5. A background worker sends the private reply, and the public reply if you enabled one.
@@ -61,11 +59,11 @@ The web app receives the webhook and serves the dashboard. A separate worker pro
 
 ## Quick start
 
-1. **Choose your Instagram connection.** [Zernio](docs/zernio.md) is recommended if you want to avoid setting up your own Meta app. It is a paid service and sponsor, not a hosted OpenReply plan. Or follow the existing [direct Meta setup](docs/setup.md#the-meta-app).
-2. **Deploy the app and worker.** Both paths need PostgreSQL, Redis, a public HTTPS URL, and email delivery for magic-link sign-in.
+1. **Create your Meta app.** Follow the [Meta app setup](docs/setup.md#the-meta-app).
+2. **Deploy the app and worker.** You need PostgreSQL, Redis, a public HTTPS URL, and email delivery for magic-link sign-in.
 3. **Connect an Instagram Business or Creator account** in Settings, create a campaign, and test a keyword comment from another account.
 
-Read [docs/setup.md](docs/setup.md) for the complete walkthrough, including a provider-aware AI assistant prompt. Existing accounts are never automatically migrated. Check [Zernio’s feature limits](docs/zernio.md#feature-availability) before choosing.
+Read [docs/setup.md](docs/setup.md) for the complete walkthrough, including an AI assistant prompt.
 
 **Moving from ManyChat or another DM tool?** Disconnect it from the Instagram account and give OpenReply control of conversations in Meta Business Suite, or button taps in DMs will fail with "not the thread owner". See [Migrating from ManyChat](docs/setup.md#migrating-from-manychat-or-another-dm-tool-give-openreply-control-of-conversations).
 

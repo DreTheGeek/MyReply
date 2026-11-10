@@ -22,10 +22,10 @@ export async function canConnectInstagramAccount({
 }) {
   const existingAccount = await prisma.instagramAccount.findUnique({
     where: { instagramId },
-    select: { workspaceId: true, provider: true },
+    select: { workspaceId: true },
   });
 
-  if (existingAccount && (existingAccount.workspaceId !== workspaceId || existingAccount.provider === "ZERNIO")) {
+  if (existingAccount && existingAccount.workspaceId !== workspaceId) {
     return {
       allowed: false,
       reason: "already_connected" as const,

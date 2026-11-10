@@ -96,11 +96,11 @@ export async function GET(request: NextRequest) {
     const existing = await prisma.instagramAccount.findUnique({ where: { instagramId } });
     if (existing) {
       const updated = await prisma.instagramAccount.updateMany({
-        where: { id: existing.id, workspaceId: state.workspaceId, provider: 'META' }, data,
+        where: { id: existing.id, workspaceId: state.workspaceId }, data,
       });
       if (!updated.count) return NextResponse.redirect(`${baseUrl}/settings?instagram=already_connected`);
     } else {
-      await prisma.instagramAccount.create({ data: { ...data, workspaceId: state.workspaceId, instagramId, provider: 'META' } });
+      await prisma.instagramAccount.create({ data: { ...data, workspaceId: state.workspaceId, instagramId } });
     }
 
     return NextResponse.redirect(`${baseUrl}/dashboard?connected=true`);

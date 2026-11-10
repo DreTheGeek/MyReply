@@ -77,7 +77,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     await processInstagramWebhook({
       payload: payload as Parameters<typeof parseCommentEvents>[0],
-      provider: "META",
     });
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {

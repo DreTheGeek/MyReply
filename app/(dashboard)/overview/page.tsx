@@ -111,12 +111,11 @@ export default function OverviewPage() {
 
   return (
     <div className="space-y-8">
-      {data.limitations?.map(note => <p key={note} className="text-sm text-muted">{note}</p>)}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
           <h1 className="text-lg font-semibold text-foreground">{t("Overview")}</h1>
           <p className="text-sm text-muted mt-1">
-            {data.provider !== "ZERNIO" && data.requestedCount === "all" ? t("All-time") : t("Recent")}, {" "}
+            {data.requestedCount === "all" ? t("All-time") : t("Recent")}, {" "}
             {t(totals.posts === 1 ? "{count} post" : "{count} posts", { count: totals.posts })} {t("from @")}
             {data.account.username}
             {data.truncated ? t(" (capped at {count})", { count: totals.posts }) : ""}

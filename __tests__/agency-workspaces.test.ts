@@ -142,10 +142,3 @@ describe("agency workspace helpers", () => {
     );
   });
 });
-
-
-
-it("does not silently replace a Zernio connection through direct Meta OAuth", async () => {
-  mockPrisma.instagramAccount.findUnique.mockResolvedValue({ workspaceId: "workspace_123", provider: "ZERNIO" });
-  await expect(canConnectInstagramAccount({ workspaceId: "workspace_123", instagramId: "ig_123" })).resolves.toMatchObject({ allowed: false });
-});

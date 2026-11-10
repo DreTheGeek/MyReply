@@ -66,7 +66,6 @@ import {
 import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
 import { hashRecipientId } from "@/lib/tracking/server";
 
-import { ZernioApiError } from "@/lib/zernio/client";
 import { DEFAULT_FOLLOW_PROMPT } from "@/lib/campaigns/follow-prompt";
 
 const BACKOFF_DELAYS = [5 * 60 * 1000, 15 * 60 * 1000, 45 * 60 * 1000];
@@ -138,8 +137,7 @@ const NON_TEMPLATE_REJECTIONS = [
 function isTemplateRejection(error: unknown): boolean {
   if (
     error instanceof TokenExpiredError ||
-    error instanceof RateLimitError ||
-    error instanceof ZernioApiError
+    error instanceof RateLimitError
   ) {
     return false;
   }
@@ -487,10 +485,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
 
     let accessToken: InstagramContext;
     try {
-      accessToken = await createInstagramContext(
-        automation.instagramAccount,
-        `${job.id}:${automation.id}`
-      );
+      accessToken = await createInstagramContext(automation.instagramAccount);
     } catch {
       await prisma.dmLog.upsert({
         where: {
@@ -786,10 +781,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
         context: accessToken,
         recipientId: commenterId,
       });
-      sendFollowPrompt =
-        accessToken.provider === "ZERNIO"
-          ? alreadyFollows === false
-          : alreadyFollows !== true;
+      sendFollowPrompt = alreadyFollows !== true;
     }
 
     let claimed;
@@ -1113,10 +1105,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
 
   let accessToken: InstagramContext;
   try {
-    accessToken = await createInstagramContext(
-      automation.instagramAccount,
-      `${job.id}:${automation.id}`,
-    );
+    accessToken = await createInstagramContext(automation.instagramAccount);
   } catch {
     // Returning silently here marked the job completed, so BullMQ never
     // retried and nothing was written anywhere: no DmLog, no OperationalEvent,
@@ -1460,10 +1449,7 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
 
   let accessToken: InstagramContext;
   try {
-    accessToken = await createInstagramContext(
-      automation.instagramAccount,
-      `${job.id}:${automation.id}`
-    );
+    accessToken = await createInstagramContext(automation.instagramAccount);
   } catch {
     // Returning silently here marked the job completed, so BullMQ never
     // retried and nothing was written anywhere: no DmLog, no OperationalEvent,
@@ -1661,10 +1647,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
 
     let accessToken: InstagramContext;
     try {
-      accessToken = await createInstagramContext(
-        automation.instagramAccount,
-        `${job.id}:${automation.id}`
-      );
+      accessToken = await createInstagramContext(automation.instagramAccount);
     } catch {
       await prisma.dmLog.upsert({
         where: {
@@ -1707,10 +1690,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
         context: accessToken,
         recipientId: senderId,
       });
-      sendFollowPrompt =
-        accessToken.provider === "ZERNIO"
-          ? follows === false
-          : follows !== true;
+      sendFollowPrompt = follows !== true;
     }
 
     const usage = await reserveWorkspaceDMSend(automation.workspaceId);
@@ -1877,8 +1857,6 @@ async function tryAssistantAnswer(job: Job<ProcessMessageJob>): Promise<boolean>
         instagramId: true,
         accessToken: true,
         workspaceId: true,
-        provider: true,
-        zernioAccountId: true,
         workspace: { select: { name: true } },
       },
     });
@@ -1887,10 +1865,7 @@ async function tryAssistantAnswer(job: Job<ProcessMessageJob>): Promise<boolean>
     const settings = await getAnsweringSettings(account.workspaceId);
     if (!settings.enabled) return false;
 
-    const accessToken = await createInstagramContext(
-      account,
-      `assistant:${messageId}`
-    );
+    const accessToken = await createInstagramContext(account);
 
     const contact = await upsertContact({
       workspaceId: account.workspaceId,
