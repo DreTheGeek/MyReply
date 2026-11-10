@@ -17,8 +17,14 @@ export async function upsertContact(params: {
   instagramAccountId: string;
   externalId: string;
   username?: string | null;
+  /**
+   * Set when the person wrote, tapped a button or arrived through a link:
+   * the moment their messaging window opened. Never set for a comment.
+   */
+  inboundAt?: Date;
 }): Promise<Contact | null> {
-  const { workspaceId, instagramAccountId, externalId, username } = params;
+  const { workspaceId, instagramAccountId, externalId, username, inboundAt } =
+    params;
   if (!externalId) return null;
 
   const now = new Date();
@@ -35,9 +41,11 @@ export async function upsertContact(params: {
         username: username ?? null,
         firstSeenAt: now,
         lastSeenAt: now,
+        ...(inboundAt ? { lastInboundAt: inboundAt } : {}),
       },
       update: {
         lastSeenAt: now,
+        ...(inboundAt ? { lastInboundAt: inboundAt } : {}),
         // Only overwrite a known username, never blank one that is already
         // stored: some events carry the handle and others do not.
         ...(username ? { username } : {}),

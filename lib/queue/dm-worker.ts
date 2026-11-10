@@ -1,4 +1,7 @@
+import { getChannelCapabilities } from "@/lib/channels/capabilities";
 import { classifySendError, isDeliveryUnconfirmed } from "@/lib/channels/errors";
+import type { ChannelPlatform } from "@/lib/channels/platforms";
+import { messagingWindow, privateReplyAllowed } from "@/lib/channels/windows";
 import { claimCommentDelivery, MAX_COMMENT_SEND_ATTEMPTS } from "./comment-delivery";
 import { createHash } from "node:crypto";
 import { UnrecoverableError, Worker, type Job } from "bullmq";
@@ -325,6 +328,56 @@ async function sendRevealDirectMessage({
 }
 
 
+/**
+ * When the person behind this job last reached out, if the job itself proves
+ * it: a message, a tap or a link arrival is the person acting, so the time
+ * the webhook received it (or, for older jobs, when BullMQ queued it) opens
+ * their messaging window.
+ */
+function inboundEvidence(job: Job<{ receivedAt?: string }>): Date | null {
+  if (job.data.receivedAt) {
+    const at = new Date(job.data.receivedAt);
+    if (!Number.isNaN(at.getTime())) return at;
+  }
+  return typeof job.timestamp === "number" ? new Date(job.timestamp) : null;
+}
+
+/** The recorded last inbound time for a person on one connected account. */
+async function lastInboundFor(
+  accountRowId: string,
+  externalId: string
+): Promise<Date | null> {
+  const contact = await prisma.contact.findUnique({
+    where: {
+      instagramAccountId_externalId: { instagramAccountId: accountRowId, externalId },
+    },
+    select: { lastInboundAt: true },
+  });
+  return contact?.lastInboundAt ?? null;
+}
+
+/**
+ * Whether an automation may message this person now, under the platform's
+ * window rules (lib/channels/windows.ts).
+ *
+ * `selfEvidenced` is true for a job the person's own action created. With no
+ * timestamp at all such a job is treated as fresh, because it is itself the
+ * proof they just reached out; anything else with no record is closed.
+ */
+function automatedWindowOpen(
+  platform: ChannelPlatform,
+  lastInboundAt: Date | null,
+  selfEvidenced: boolean
+): boolean {
+  if (lastInboundAt === null) return selfEvidenced;
+  return messagingWindow({
+    capabilities: getChannelCapabilities(platform),
+    lastInboundAt,
+    now: new Date(),
+    sender: "automation",
+  }).allowed;
+}
+
 function connectionScope(data: DmQueueJob) {
   return data.accountConnectionId ? { instagramAccountId: data.accountConnectionId } : {};
 }
@@ -567,6 +620,33 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
     // DM already sent on an earlier pass; the public reply retry above was all
     // this run needed. Don't re-send the DM.
     if (!needsDm) continue;
+
+    // A comment opens one private reply, and only for so many days after it
+    // was made (7 on Instagram). Past that the platform refuses, so the DM leg
+    // is skipped and recorded rather than sent to fail. A Live comment has its
+    // own rule, the broadcast itself, handled at the rate-limit step below.
+    if (
+      job.data.source !== "LIVE" &&
+      !privateReplyAllowed(
+        getChannelCapabilities(automation.instagramAccount.platform),
+        job.data.commentCreatedAt ? new Date(job.data.commentCreatedAt) : null,
+        new Date()
+      )
+    ) {
+      const days = getChannelCapabilities(automation.instagramAccount.platform)
+        .window.privateReplyDays;
+      await prisma.dmLog.update({
+        where: {
+          automationId_commentId: { automationId: automation.id, commentId },
+        },
+        data: {
+          status: "SKIPPED_WINDOW_CLOSED",
+          matchedKeyword: matchResult.matchedKeyword,
+          errorMessage: `A private reply can only go out within ${days} days of the comment`,
+        },
+      });
+      continue;
+    }
 
     // Meta allows exactly ONE private reply per comment, ever, across every
     // campaign. When several campaigns match the same comment (duplicated
@@ -1087,6 +1167,23 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
     return;
   }
 
+  // The account may only write inside the person's messaging window. A tap or
+  // link arrival opens it, so a job created by one is its own evidence. A read
+  // receipt is not a reply: a read fallback may only send if the person wrote
+  // to the account recently.
+  const windowEvidence = fallback
+    ? await lastInboundFor(automation.instagramAccount.id, userId)
+    : inboundEvidence(job);
+  if (
+    !automatedWindowOpen(automation.instagramAccount.platform, windowEvidence, !fallback)
+  ) {
+    console.log(
+      `[DM Worker] ${fallback ? "Read fallback" : "Reveal"} skipped: the messaging window is closed`,
+      { automationId: automation.id }
+    );
+    return;
+  }
+
   // Duplicate sends are enabled: every button tap re-sends the reveal
   // instead of only firing once per person.
   const dedupeId = `reveal:${userId}`;
@@ -1435,10 +1532,27 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
         externalId: userId,
       },
     },
-    select: { optedOutAt: true },
+    select: { optedOutAt: true, lastInboundAt: true },
   });
 
   if (!canMessageContact(contact?.optedOutAt)) {
+    return;
+  }
+
+  // A follow-up is not a reply to anything the person just did, so it needs
+  // their messaging window to still be open from their last message or tap.
+  // A comment alone never opens it: after a plain private reply the platform
+  // allows nothing more until the person answers.
+  if (
+    !automatedWindowOpen(
+      automation.instagramAccount.platform,
+      contact?.lastInboundAt ?? null,
+      false
+    )
+  ) {
+    console.log("[DM Worker] Follow-up skipped: the messaging window is closed", {
+      automationId: automation.id,
+    });
     return;
   }
 
@@ -1530,6 +1644,11 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
   // Jobs enqueued before story triggers existed carry no kind.
   const kind = job.data.kind ?? "dm";
 
+  // A message opens the window, but a job that sat in a retry backoff past it
+  // must not answer on a stale clock.
+  const messageWindowOpen = (platform: ChannelPlatform): boolean =>
+    automatedWindowOpen(platform, inboundEvidence(job), true);
+
   // A quick reply tap already names the follow-up it wants, so it never goes
   // near the keyword matcher. Hand it to the postback handler, which is what
   // already resolves `reveal:` and `followcheck:` payloads, rather than
@@ -1543,6 +1662,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
         instagramAccountId,
         userId: senderId,
         payload: quickReplyPayload,
+        receivedAt: job.data.receivedAt,
       },
     } as unknown as Job<ProcessPostbackJob>);
   }
@@ -1577,6 +1697,16 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
     },
     orderBy: { createdAt: "asc" },
   });
+
+  if (
+    automations.length > 0 &&
+    !messageWindowOpen(automations[0].instagramAccount.platform)
+  ) {
+    console.log("[DM Worker] DM reply skipped: the messaging window is closed", {
+      messageId,
+    });
+    return;
+  }
 
   const dedupeId = `dm:${messageId}`;
   let anyMatched = false;

@@ -53,6 +53,11 @@ export interface ProcessCommentJob {
   // Set when the comment came from an ad: the organic post the ad was made
   // from. Campaigns are bound to that post, so both ids have to be matched.
   originalMediaId?: string;
+  /**
+   * ISO time the comment was made, when known. The private reply is skipped
+   * past the platform's window rather than sent to be refused.
+   */
+  commentCreatedAt?: string;
   requeueAttempt?: number;
   // Which path enqueued this comment. It is not copied to ProcessedComment or
   // used for reconciliation dedup.
@@ -74,6 +79,12 @@ export interface ProcessPostbackJob {
   // How many delayed re-checks have run, counting this one. Absent on jobs
   // queued before re-checks were counted, where `followRecheck` meant one.
   followRecheckAttempt?: number;
+  /**
+   * ISO time the tap or link arrival reached the webhook. Present on jobs a
+   * person's own action created, which is what lets the worker see their
+   * messaging window is open without a database read.
+   */
+  receivedAt?: string;
 }
 
 // Scheduled after the link is delivered, to send the appreciation follow-up.
@@ -106,6 +117,8 @@ export interface ProcessMessageJob {
    * button's own title.
    */
   quickReplyPayload?: string;
+  /** ISO time the message reached the webhook. See ProcessPostbackJob. */
+  receivedAt?: string;
 }
 
 export type DmQueueJob =

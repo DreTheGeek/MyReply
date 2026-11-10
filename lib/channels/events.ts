@@ -31,6 +31,8 @@ export interface CommentEvent extends EventBase {
    * organic post it came from, which is what campaigns are bound to.
    */
   originalMediaId?: string;
+  /** When the comment was made, when the platform says. */
+  createdAt?: Date;
 }
 
 export type MessageKind = "dm" | "story_reply" | "story_mention";

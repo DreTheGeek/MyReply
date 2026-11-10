@@ -208,6 +208,12 @@ model Contact {
   /// telling one brand to stop does not opt them out of another workspace's
   /// messages. Different senders; they only asked one of them.
   optedOutAt         DateTime?
+  /// The last time this person wrote to the account, tapped one of its
+  /// buttons or arrived through one of its links. It is what opens the
+  /// platform's messaging window, so every automated message checks it. A
+  /// comment does not set it: a comment opens one private reply, not a
+  /// conversation. Null on rows from before it was recorded.
+  lastInboundAt      DateTime?
   /// Positive reactions this person has placed on messages we delivered.
   /// Only "react" moves this; an "unreact" is a withdrawal, not a signal, so
   /// it is deliberately not recorded and never decrements. Segmentation asks
@@ -699,6 +705,9 @@ enum DmStatus {
   /// The recipient replied STOP. Distinct from the other skips because it is
   /// the one an owner may be asked to account for.
   SKIPPED_OPTED_OUT
+  /// The platform's messaging rules would refuse the send: a comment past its
+  /// private-reply window, or a person who has not written in 24 hours.
+  SKIPPED_WINDOW_CLOSED
 }
 
 enum WebhookStatus {

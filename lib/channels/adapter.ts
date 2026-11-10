@@ -104,7 +104,16 @@ export interface ChannelWebhook {
 export interface ChannelMessaging {
   send(
     context: ChannelContext,
-    input: { to: SendTarget; content: OutboundContent }
+    input: {
+      to: SendTarget;
+      content: OutboundContent;
+      /**
+       * Send under the platform's human-agent window. Only a person replying
+       * from the inbox may set this, only when lib/channels/windows.ts says
+       * the window allows it, and only for plain text to an open conversation.
+       */
+      humanAgent?: boolean;
+    }
   ): Promise<SendReceipt>;
   /** Reply under a comment, publicly. Requires capabilities.publicReply. */
   publicReply(

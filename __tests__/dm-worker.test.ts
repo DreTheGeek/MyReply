@@ -744,6 +744,8 @@ describe("DM Worker, Full Pipeline", () => {
   });
 
   it("should deliver the next DM from a read fallback when no button tap has sent it yet", async () => {
+    // This person wrote to the account recently, so their window is open.
+    mockPrisma.contact.findUnique.mockResolvedValue({ optedOutAt: null, lastInboundAt: new Date() });
     mockPrisma.automation.findMany.mockResolvedValue([]);
     mockPrisma.automation.findFirst.mockResolvedValue({
       ...mockAutomation,
@@ -852,6 +854,8 @@ describe("DM Worker, Full Pipeline", () => {
   });
 
   it("should deliver a follow-gated read fallback once the user follows", async () => {
+    // This person wrote to the account recently, so their window is open.
+    mockPrisma.contact.findUnique.mockResolvedValue({ optedOutAt: null, lastInboundAt: new Date() });
     mockPrisma.automation.findMany.mockResolvedValue([]);
     mockPrisma.automation.findFirst.mockResolvedValue({
       ...mockAutomation,
@@ -879,6 +883,8 @@ describe("DM Worker, Full Pipeline", () => {
   });
 
   it("should not log a failure when a read fallback hits a closed messaging window", async () => {
+    // This person wrote to the account recently, so their window is open.
+    mockPrisma.contact.findUnique.mockResolvedValue({ optedOutAt: null, lastInboundAt: new Date() });
     mockPrisma.automation.findMany.mockResolvedValue([]);
     mockPrisma.automation.findFirst.mockResolvedValue({
       ...mockAutomation,
@@ -1309,6 +1315,112 @@ describe("DM Worker, the default follow-gate prompt", () => {
   });
 });
 
+describe("DM Worker, the platform's messaging windows", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("skips a comment's private reply past the 7 day window, and records why", async () => {
+    vi.useFakeTimers({ now: new Date("2026-09-20T12:00:00Z"), toFake: ["Date"] });
+    // A copy: createMockJob shares one data object across tests.
+    const base = createMockJob();
+    const job = { ...base, data: { ...base.data, commentCreatedAt: "2026-09-10T12:00:00Z" } };
+
+    await getProcessor()(job);
+
+    expect(mockSendPrivateReply).not.toHaveBeenCalled();
+    expect(mockReserveWorkspaceDMSend).not.toHaveBeenCalled();
+    expect(mockPrisma.dmLog.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "SKIPPED_WINDOW_CLOSED" }),
+      })
+    );
+  });
+
+  it("still sends a private reply inside the window", async () => {
+    vi.useFakeTimers({ now: new Date("2026-09-12T12:00:00Z"), toFake: ["Date"] });
+    // A copy: createMockJob shares one data object across tests.
+    const base = createMockJob();
+    const job = { ...base, data: { ...base.data, commentCreatedAt: "2026-09-10T12:00:00Z" } };
+
+    await getProcessor()(job);
+
+    expect(mockSendPrivateReply).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not apply the 7 day rule to a Live comment, which has its own", async () => {
+    mockPrisma.automation.findMany.mockResolvedValue([{ ...mockAutomation, liveCommentEnabled: true }]);
+    const base = createMockJob();
+    const job = {
+      ...base,
+      data: { ...base.data, source: "LIVE", commentCreatedAt: "2026-01-01T00:00:00Z" },
+    };
+
+    await getProcessor()(job);
+
+    expect(mockSendPrivateReply).toHaveBeenCalledTimes(1);
+  });
+
+  it("never sends a read fallback to someone who has not written in", async () => {
+    mockPrisma.automation.findMany.mockResolvedValue([]);
+    mockPrisma.automation.findFirst.mockResolvedValue({ ...mockAutomation, trackedLinks: [] });
+    mockPrisma.contact.findUnique.mockResolvedValue({ optedOutAt: null, lastInboundAt: null });
+
+    await getProcessor()(
+      createMockPostbackJob({
+        instagramAccountId: "ig_456",
+        userId: "commenter_999",
+        payload: "reveal:auto_789",
+        fallback: true,
+      })
+    );
+
+    // Reading a private reply is not answering it, so nothing may follow.
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    expect(mockReserveWorkspaceDMSend).not.toHaveBeenCalled();
+  });
+
+  it("does not answer a button tap whose job sat past the 24 hour window", async () => {
+    vi.useFakeTimers({ now: new Date("2026-09-03T12:00:00Z"), toFake: ["Date"] });
+    mockPrisma.automation.findMany.mockResolvedValue([]);
+    mockPrisma.automation.findFirst.mockResolvedValue({ ...mockAutomation, trackedLinks: [] });
+
+    await getProcessor()(
+      createMockPostbackJob({
+        instagramAccountId: "ig_456",
+        userId: "commenter_999",
+        payload: "reveal:auto_789",
+        receivedAt: "2026-09-01T12:00:00Z",
+      })
+    );
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not send a follow-up once the window has closed", async () => {
+    vi.useFakeTimers({ now: new Date("2026-09-03T15:00:00Z"), toFake: ["Date"] });
+    mockPrisma.contact.findUnique.mockResolvedValue({
+      optedOutAt: null,
+      lastInboundAt: new Date("2026-09-01T12:00:00Z"),
+    });
+    mockPrisma.automation.findFirst.mockResolvedValue({
+      ...mockAutomation,
+      followUpEnabled: true,
+      followUpMessage: "Thanks again",
+      workspace: { id: "workspace_123", timezone: "UTC", quietHoursEnabled: false, quietHoursStart: 21, quietHoursEnd: 9 },
+    });
+
+    await getProcessor()({
+      name: "process-followup",
+      data: { instagramAccountId: "ig_456", userId: "commenter_999", automationId: "auto_789" },
+      id: "followup_job_002",
+      attemptsMade: 0,
+    });
+
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+  });
+});
+
 describe("DM Worker, follow-ups held for quiet hours", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -1317,7 +1429,11 @@ describe("DM Worker, follow-ups held for quiet hours", () => {
   it("requeues a held follow-up under the name the worker routes to the follow-up handler", async () => {
     // 03:00 UTC, inside the default 21:00 to 09:00 quiet window.
     vi.useFakeTimers({ now: new Date("2026-09-01T03:00:00Z"), toFake: ["Date"] });
-    mockPrisma.contact.findUnique.mockResolvedValue(null);
+    // They tapped the reveal an hour ago, so the window is open.
+    mockPrisma.contact.findUnique.mockResolvedValue({
+      optedOutAt: null,
+      lastInboundAt: new Date("2026-09-01T02:00:00Z"),
+    });
     mockPrisma.automation.findFirst.mockResolvedValue({
       ...mockAutomation,
       followUpEnabled: true,

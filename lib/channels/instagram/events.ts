@@ -53,6 +53,7 @@ export function parseInstagramEvents(payload: unknown): ChannelEvent[] {
       authorName: e.commenterName,
       mediaId: e.mediaId,
       originalMediaId: e.originalMediaId,
+      createdAt: e.createdAt,
     });
   }
 

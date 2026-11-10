@@ -11,7 +11,10 @@ import {
 import { reserveDMSlot } from "@/lib/utils/rate-limiter";
 import { getCurrentWorkspaceId } from "@/lib/auth";
 import { getWorkspaceInstagramAccount } from "@/lib/instagram-accounts";
+import { getChannelCapabilities } from "@/lib/channels/capabilities";
 import { getChannelAdapter, openChannel } from "@/lib/channels/registry";
+import { isHumanAgentApproved, messagingWindow } from "@/lib/channels/windows";
+import { prisma } from "@/lib/db/client";
 
 export interface ConversationListItem {
   id: string;
@@ -169,6 +172,42 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // A person is replying, so the platform's human rules apply: inside 24 hours
+  // of their last message it is an ordinary reply; after that, only inside the
+  // human agent window, and only once the app is approved for it. A
+  // conversation with no recorded inbound (it predates the record) is sent as
+  // is and the platform decides.
+  const contact = await prisma.contact.findUnique({
+    where: {
+      instagramAccountId_externalId: {
+        instagramAccountId: account.id,
+        externalId: recipientId,
+      },
+    },
+    select: { lastInboundAt: true },
+  });
+  let humanAgent = false;
+  if (contact?.lastInboundAt) {
+    const decision = messagingWindow({
+      capabilities: getChannelCapabilities(account.platform),
+      lastInboundAt: contact.lastInboundAt,
+      now: new Date(),
+      sender: "human",
+      humanAgentApproved: isHumanAgentApproved(),
+    });
+    if (!decision.allowed) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "This conversation can't be answered any more. They need to message you again before you can reply.",
+        },
+        { status: 409 }
+      );
+    }
+    humanAgent = decision.humanAgentTag;
+  }
+
   // Same order the worker uses: the workspace budget first, then the per
   // account slot, so a rejected send releases the workspace reservation rather
   // than silently consuming it.
@@ -201,6 +240,7 @@ export async function POST(request: NextRequest) {
     const result = await channel.adapter.messaging.send(channel.context, {
       to: { kind: "user", userId: recipientId },
       content: { kind: "text", text },
+      humanAgent,
     });
     return NextResponse.json({ success: true, data: result });
   } catch (err) {

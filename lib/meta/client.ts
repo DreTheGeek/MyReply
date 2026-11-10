@@ -458,7 +458,8 @@ export async function sendDirectMessage(
   accessToken: string,
   instagramAccountId: string,
   userId: string,
-  message: string
+  message: string,
+  options: { humanAgent?: boolean } = {}
 ): Promise<{ recipient_id: string; message_id: string }> {
   const response = await fetch(
     `${instagramGraphBase()}/${instagramAccountId}/messages`,
@@ -471,6 +472,12 @@ export async function sendDirectMessage(
       body: JSON.stringify({
         recipient: { id: userId },
         message: { text: message },
+        // A person replying from the inbox after the 24 hour window, inside
+        // the 7 day human agent window. Only ever set by a human send, and
+        // only once the app is approved for the Human Agent feature.
+        ...(options.humanAgent
+          ? { messaging_type: "MESSAGE_TAG", tag: "HUMAN_AGENT" }
+          : {}),
       }),
     }
   );

@@ -278,6 +278,22 @@ export async function processChannelWebhook({
     });
   }
 
+  /**
+   * Record that a person reached out, which opens the platform's messaging
+   * window. Done before any job is queued, so the worker's window check reads
+   * a value that already includes this event.
+   */
+  async function markInbound(account: ResolvedAccount, externalId: string): Promise<void> {
+    await upsertContact({
+      workspaceId: account.workspaceId,
+      instagramAccountId: account.id,
+      externalId,
+      inboundAt: receivedAt,
+    });
+  }
+
+  const receivedAt = new Date();
+
   try {
     const queue = getDMQueue();
 
@@ -301,6 +317,9 @@ export async function processChannelWebhook({
               commenterName: event.authorName,
               mediaId: event.mediaId,
               ...(live ? {} : { originalMediaId: event.originalMediaId }),
+              ...(event.createdAt
+                ? { commentCreatedAt: event.createdAt.toISOString() }
+                : {}),
               source: live ? "LIVE" : "WEBHOOK",
             },
             {
@@ -323,6 +342,10 @@ export async function processChannelWebhook({
             select: { id: true },
           });
 
+          // Arriving through a link opens the window whether or not the ref
+          // still names a live campaign.
+          await markInbound(account, event.userId);
+
           // An unknown ref is not an error. It usually means a campaign was
           // paused or renamed while its QR codes are still in the wild.
           if (!automation) break;
@@ -334,6 +357,7 @@ export async function processChannelWebhook({
               accountConnectionId: account.id,
               userId: event.userId,
               payload: `reveal:${automation.id}`,
+              receivedAt: receivedAt.toISOString(),
             },
             {
               jobId: `referral_${event.accountExternalId}_${event.userId}_${automation.id}`,
@@ -345,6 +369,7 @@ export async function processChannelWebhook({
 
         // Button taps from opening DMs, which deliver the reveal message.
         case "postback": {
+          await markInbound(account, event.userId);
           await queue.add(
             POSTBACK_JOB_NAME,
             {
@@ -353,6 +378,7 @@ export async function processChannelWebhook({
               userId: event.userId,
               payload: event.payload,
               mid: event.mid,
+              receivedAt: receivedAt.toISOString(),
             },
             {
               // BullMQ forbids ":" in custom job ids, and the payload is
@@ -372,6 +398,7 @@ export async function processChannelWebhook({
           // inbound message can be, so it is handled here, before the message
           // is queued for anything else. Recorded even when the reply is also
           // a keyword match: "stop" is not a campaign trigger.
+          await markInbound(account, event.senderId);
           const intent = detectOptOutIntent(event.text);
           if (intent) {
             await applyOptOut({
@@ -399,6 +426,7 @@ export async function processChannelWebhook({
               senderId: event.senderId,
               kind: event.kind,
               quickReplyPayload: event.quickReplyPayload,
+              receivedAt: receivedAt.toISOString(),
             },
             {
               // Message ids can contain characters BullMQ rejects in a job id
@@ -471,6 +499,7 @@ export async function processChannelWebhook({
         // correction.
         case "message_edit": {
           await backfillWorkspace(account.workspaceId);
+          await markInbound(account, event.senderId);
 
           // Editing a message must never earn a second DM. The worker's own
           // per-campaign guard stops the campaign that already replied, but it
@@ -497,6 +526,7 @@ export async function processChannelWebhook({
               messageText: event.text,
               senderId: event.senderId,
               kind: "dm",
+              receivedAt: receivedAt.toISOString(),
             },
             {
               jobId: `message_edit_${event.accountExternalId}_${Buffer.from(

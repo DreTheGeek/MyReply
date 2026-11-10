@@ -45,6 +45,22 @@ export interface WebhookCommentEvent {
    * matching has to consider it as well as mediaId.
    */
   originalMediaId?: string;
+  /**
+   * When the comment was made, from the notification's `entry.time`. The
+   * private reply has to go out within seven days of it.
+   */
+  createdAt?: Date;
+}
+
+/**
+ * `entry.time` as a Date. Meta sends it in seconds for change notifications
+ * and has sent milliseconds elsewhere, so both are read.
+ */
+function entryTime(time: number | undefined): Date | undefined {
+  if (typeof time !== "number" || !Number.isFinite(time) || time <= 0) {
+    return undefined;
+  }
+  return new Date(time > 1e12 ? time : time * 1000);
 }
 
 /**
@@ -309,6 +325,7 @@ export function parseCommentEvents(payload: WebhookPayload): WebhookCommentEvent
         commenterName: value.from?.username,
         mediaId,
         originalMediaId,
+        createdAt: entryTime(entry.time),
       });
     }
   }

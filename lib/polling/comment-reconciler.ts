@@ -357,6 +357,7 @@ async function sweepCampaign({
         accountConnectionId: account.id,
         commentId: c.id,
         commentText: c.text ?? "",
+        commentCreatedAt: c.timestamp,
         // The filter above only keeps comments whose author is known.
         commenterId: c.authorId as string,
         commenterName: c.authorName ?? undefined,

@@ -386,3 +386,39 @@ describe("routing between Meta products", () => {
     expect(mockPrisma.webhookEvent.create).not.toHaveBeenCalled();
   });
 });
+
+describe("a webhook Meta delivers twice", () => {
+  it("queues the same job ids both times, so the second delivery adds nothing", async () => {
+    const payload = {
+      object: "instagram",
+      entry: [
+        {
+          id: ACCOUNT,
+          time: 1,
+          changes: [
+            {
+              field: "comments",
+              value: { id: "c_dup", text: "LINK", from: { id: USER, username: "u" }, media: { id: "m1" } },
+            },
+          ],
+          messaging: [
+            { sender: { id: USER }, recipient: { id: ACCOUNT }, timestamp: 2, message: { mid: "mid_dup", text: "PRICE" } },
+          ],
+        },
+      ],
+    };
+
+    await post(payload);
+    const first = mockQueueAdd.mock.calls.map(([, , opts]) => opts.jobId);
+    mockQueueAdd.mockClear();
+    await post(payload);
+    const second = mockQueueAdd.mock.calls.map(([, , opts]) => opts.jobId);
+
+    // BullMQ drops a job whose id it already holds. Past its retention, the
+    // worker's durable per-leg claim is what stops a second send; that is
+    // covered in dm-worker.test.ts ("ambiguous Meta sends and durable comment
+    // claims" and "durable postback delivery").
+    expect(first.length).toBeGreaterThan(0);
+    expect(second).toEqual(first);
+  });
+});

@@ -167,6 +167,25 @@ describe("send: one neutral message, one Graph call", () => {
     expect(m.sendAttachment).toHaveBeenCalledWith("tok", "ig_1", "u1", "https://a.test/x.pdf", "file");
   });
 
+  it("a human agent reply carries the tag, and only as plain text to a person", async () => {
+    await send(ctx, {
+      to: { kind: "user", userId: "u1" },
+      content: { kind: "text", text: "Sorry for the wait" },
+      humanAgent: true,
+    });
+    expect(m.sendDirectMessage).toHaveBeenCalledWith("tok", "ig_1", "u1", "Sorry for the wait", {
+      humanAgent: true,
+    });
+
+    await expect(
+      send(ctx, {
+        to: { kind: "comment", commentId: "c1" },
+        content: { kind: "text", text: "no" },
+        humanAgent: true,
+      })
+    ).rejects.toBeInstanceOf(UnsupportedContentError);
+  });
+
   it("a public reply posts under the comment", async () => {
     m.sendCommentReply.mockResolvedValue({ id: "reply_1" });
     await expect(

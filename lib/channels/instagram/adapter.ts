@@ -52,8 +52,17 @@ const PLATFORM = "INSTAGRAM" as const;
  */
 async function send(
   context: ChannelContext,
-  { to, content }: { to: SendTarget; content: OutboundContent }
+  {
+    to,
+    content,
+    humanAgent = false,
+  }: { to: SendTarget; content: OutboundContent; humanAgent?: boolean }
 ): Promise<SendReceipt> {
+  if (humanAgent && (to.kind !== "user" || content.kind !== "text" || content.quickReplies?.length)) {
+    throw new UnsupportedContentError(
+      "A human agent reply is plain text to an open conversation."
+    );
+  }
   const token = context.accessToken;
   const account = context.accountExternalId;
 
@@ -92,7 +101,11 @@ async function send(
             content.text,
             quickReplies
           )
-        : await meta.sendDirectMessage(token, account, to.userId, content.text)
+        : humanAgent
+          ? await meta.sendDirectMessage(token, account, to.userId, content.text, {
+              humanAgent: true,
+            })
+          : await meta.sendDirectMessage(token, account, to.userId, content.text)
     );
   }
 

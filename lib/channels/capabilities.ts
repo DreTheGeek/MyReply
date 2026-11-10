@@ -102,9 +102,11 @@ export interface ChannelCapabilities {
  * for its one private reply. Cap: 750 private replies per account per hour,
  * Meta's documented limit for that call.
  *
- * humanAgentDays is null because nothing in the engine uses the human-agent
- * tag yet. Whether Instagram Login apps may use it is checked against Meta's
- * current docs in Phase 3, before anything relies on it.
+ * Human agent: Meta's Instagram messaging docs describe "a separate 7-day
+ * Human Agent window" for a human replying from a custom inbox. It needs the
+ * Human Agent feature through App Review, so the engine uses it only for a
+ * person replying in the inbox, and only once META_HUMAN_AGENT_APPROVED is set
+ * (see lib/channels/windows.ts). Automations never use it.
  */
 const INSTAGRAM: ChannelCapabilities = {
   directMessage: true,
@@ -133,7 +135,7 @@ const INSTAGRAM: ChannelCapabilities = {
   iceBreakers: { supported: true, max: 4, questionMax: 80, payloadMax: 1000 },
   persistentMenu: { supported: true, maxItems: 5, titleMax: 30, payloadMax: 1000 },
   inbox: true,
-  window: { standardHours: 24, privateReplyDays: 7, humanAgentDays: null },
+  window: { standardHours: 24, privateReplyDays: 7, humanAgentDays: 7 },
   rateLimits: { privateRepliesPerHour: 750 },
 };
 
