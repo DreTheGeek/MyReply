@@ -64,6 +64,12 @@ export const connectLinkSchema = z
   })
   .strict();
 
+export const inboxLinkSchema = z
+  .object({
+    expiresInMinutes: z.number().int().min(1).max(MAX_LINK_MINUTES.inbox).optional(),
+  })
+  .strict();
+
 export type AccountStatus = "connected" | "needs_reconnect" | "events_off";
 
 /**
@@ -349,6 +355,39 @@ export async function createConnectLink(
   return {
     ok: true,
     url: `${hostedBaseUrl(partner.customDomain, getBaseUrl())}/hosted/connect/${token}`,
+    expiresAt: expiresAt.toISOString(),
+  };
+}
+
+/**
+ * A signed link to the hosted inbox for one of the partner's workspaces: the
+ * conversations on every connected account, and a reply box. Anyone holding
+ * the link can read and reply until it expires, so it is minted for the
+ * person who owns the workspace and lasts at most twelve hours.
+ */
+export async function createInboxLink(
+  partnerId: string,
+  workspaceId: string,
+  input: z.infer<typeof inboxLinkSchema>
+): Promise<ConnectLinkResult> {
+  const [workspace, partner] = await Promise.all([
+    prisma.workspace.findFirst({ where: { id: workspaceId, partnerId }, select: { id: true } }),
+    prisma.partner.findUnique({
+      where: { id: partnerId },
+      select: { frameOrigins: true, customDomain: true },
+    }),
+  ]);
+  if (!workspace || !partner) {
+    return { ok: false, status: 404, error: "That workspace was not found for this key." };
+  }
+
+  const { token, expiresAt } = createHostedToken(
+    { k: "inbox", w: workspace.id, p: partnerId, fa: partner.frameOrigins },
+    input.expiresInMinutes ?? 60
+  );
+  return {
+    ok: true,
+    url: `${hostedBaseUrl(partner.customDomain, getBaseUrl())}/hosted/inbox/${token}`,
     expiresAt: expiresAt.toISOString(),
   };
 }

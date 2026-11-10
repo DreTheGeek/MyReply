@@ -9,6 +9,7 @@ import { apiSendSchema } from "@/lib/messaging/api-send";
 import {
   connectLinkSchema,
   createWorkspaceSchema,
+  inboxLinkSchema,
   updateWorkspaceSchema,
 } from "@/lib/partners/workspaces";
 import { createEndpointSchema, updateEndpointSchema } from "@/lib/webhooks/endpoints";
@@ -74,6 +75,7 @@ const OPERATIONS: Operation[] = [
   { path: "/workspaces/{id}", method: "patch", auth: "partner", scope: "workspaces:write", summary: "Rename a workspace, or change its externalId or timezone", body: updateWorkspaceSchema, idempotency: "optional" },
   { path: "/workspaces/{id}", method: "delete", auth: "partner", scope: "workspaces:write", summary: "Delete a workspace and everything under it", description: "Recorded in the audit log.", idempotency: "optional" },
   { path: "/workspaces/{id}/connect-links", method: "post", auth: "partner", scope: "workspaces:write", summary: "A signed link to the hosted Connect your accounts page", description: "When the person finishes they land on returnUrl with connect_status (connected, denied, failed, forbidden, already_connected, plan_limit, none_granted, unavailable), platform and workspace_id added. returnUrl must be on an origin set up for you in advance.", body: connectLinkSchema, idempotency: "optional", success: 201 },
+  { path: "/workspaces/{id}/inbox-links", method: "post", auth: "partner", scope: "workspaces:write", summary: "A signed link to the hosted inbox", description: "Conversations on every connected account, with a reply box. Anyone holding the link can read and reply until it expires (default 60 minutes, at most 720), so mint it for the workspace's owner, when they open it.", body: inboxLinkSchema, idempotency: "optional", success: 201 },
   { path: "/workspaces/usage", method: "get", auth: "partner", scope: "workspaces:read", summary: "Usage for every one of your workspaces", query: range },
   { path: "/partner/webhooks", method: "get", auth: "partner", scope: "webhooks:read", summary: "Your endpoints, which hear all of your workspaces" },
   { path: "/partner/webhooks", method: "post", auth: "partner", scope: "webhooks:write", summary: "Add an endpoint for all of your workspaces", description: "The answer carries the signing secret, shown this once.", body: createEndpointSchema, idempotency: "optional", success: 201 },
