@@ -127,8 +127,6 @@ export default function SettingsPage() {
     if (!starterAccountId) return;
 
     let cancelled = false;
-    setStarterError(null);
-    setStarterNotice(null);
 
     fetch(
       `/api/instagram/conversation-starters?instagramAccountId=${encodeURIComponent(
@@ -486,7 +484,15 @@ export default function SettingsPage() {
                 <select
                   id="starter-account"
                   value={starterAccountId ?? ""}
-                  onChange={(event) => setStarterAccountId(event.target.value)}
+                  onChange={(event) => {
+                    // Cleared here rather than in the loading effect: a
+                    // message about the previous account must not linger on
+                    // the next one, and resetting state inside the effect
+                    // re-renders the whole page a second time.
+                    setStarterError(null);
+                    setStarterNotice(null);
+                    setStarterAccountId(event.target.value);
+                  }}
                   className="w-full rounded border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-accent/40"
                 >
                   {accounts.map((account) => (
