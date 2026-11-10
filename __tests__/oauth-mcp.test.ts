@@ -280,6 +280,13 @@ const { store, mockPrisma, mockAuth, mockSafeFetch } = vi.hoisted(() => {
   };
 });
 
+// The per-credential limit has its own tests. Here it always allows, so these
+// assertions stay about authentication and scope.
+vi.mock("@/lib/api/rate-limit", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/api/rate-limit")>()),
+  consumeCredentialRequest: vi.fn(async () => ({ status: "allowed", remaining: 119 })),
+}));
+
 vi.mock("@/lib/db/client", () => ({ prisma: mockPrisma }));
 vi.mock("@/lib/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/knowledge/ssrf", () => {

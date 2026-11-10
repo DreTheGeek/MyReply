@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { MCP_TOOLS, mcpToolsForRole, runMcpTool } from "@/lib/mcp/tools";
-import { corsPreflight } from "@/lib/oauth/errors";
+import { consumeCredentialRequest, rateLimitRefusal } from "@/lib/api/rate-limit";
+import { CORS_HEADERS, corsPreflight } from "@/lib/oauth/errors";
 import {
   authenticateMcpRequest,
   insufficientScopeResponse,
@@ -24,7 +25,27 @@ export const dynamic = "force-dynamic";
  *   API key: Authorization: Bearer mr_live_...
  */
 
-const PROTOCOL_VERSION = "2024-11-05";
+/**
+ * Protocol revisions this server speaks, oldest first. A client asking for one
+ * of these gets it back; anything else is answered with the newest, which is
+ * what the MCP spec asks a server to do. The tools are plain request and
+ * response either way, so nothing here differs between revisions.
+ */
+const SUPPORTED_PROTOCOL_VERSIONS = [
+  "2024-11-05",
+  "2025-03-26",
+  "2025-06-18",
+  "2025-11-25",
+] as const;
+const PROTOCOL_VERSION =
+  SUPPORTED_PROTOCOL_VERSIONS[SUPPORTED_PROTOCOL_VERSIONS.length - 1];
+
+function negotiateProtocolVersion(requested: unknown): string {
+  return typeof requested === "string" &&
+    (SUPPORTED_PROTOCOL_VERSIONS as readonly string[]).includes(requested)
+    ? requested
+    : PROTOCOL_VERSION;
+}
 
 type JsonRpcId = string | number | null;
 
@@ -65,11 +86,23 @@ export async function POST(request: NextRequest) {
   }
   const auth = authenticated.credential;
 
+  // After authentication, so an unauthenticated flood is turned away by the
+  // credential check without touching Redis, and per credential, so one busy
+  // integration cannot use up another's allowance.
+  const decision = await consumeCredentialRequest(auth.credentialId);
+  if (decision.status !== "allowed") {
+    const refusal = rateLimitRefusal(decision);
+    return NextResponse.json(
+      { error: "rate_limited", error_description: refusal.message },
+      { status: refusal.status, headers: { ...CORS_HEADERS, ...refusal.headers } }
+    );
+  }
+
   switch (method) {
     case "initialize":
       return result(id, {
-        protocolVersion: PROTOCOL_VERSION,
-        capabilities: { tools: {} },
+        protocolVersion: negotiateProtocolVersion(params?.protocolVersion),
+        capabilities: { tools: { listChanged: false } },
         serverInfo: { name: "myreply", version: "1.0.0" },
       });
 

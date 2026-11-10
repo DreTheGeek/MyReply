@@ -144,6 +144,7 @@ you what it made.
 | `list_campaigns` | Existing campaigns with keywords, triggers and live state. |
 | `create_campaign` | Create a comment-to-DM campaign, optionally with a tracked link. |
 | `update_campaign` | Change a campaign. Send only the fields you want changed. |
+| `get_campaign` | One campaign's complete settings, with its destination links in button order. A link that is not set is null. |
 | `get_campaign_performance` | Sends, failures, skips and click rate for one campaign. |
 | `list_dm_logs` | Recent sends and why any of them did not arrive. |
 
@@ -201,6 +202,17 @@ v1 requires an API key and rejects a browser session, even a valid one. Cookies
 travel automatically, so a logged-in user visiting a hostile page could
 otherwise have their browser make authenticated calls on their behalf. A key is
 sent deliberately by a program, which is the entire audience for this surface.
+
+## Rate limits
+
+Every API key, and every OAuth connection, gets 120 requests a minute across
+`/api/v1` and `/api/mcp` together. Past that the answer is `429` with a
+`Retry-After` header saying how many seconds are left in the window. The limit
+is kept in Redis, and if Redis cannot be reached the answer is `503` rather
+than an unlimited pass.
+
+MCP clients may ask for protocol revision `2024-11-05`, `2025-03-26`,
+`2025-06-18` or `2025-11-25`. Any other request is answered with the newest.
 
 ## Limits worth knowing
 

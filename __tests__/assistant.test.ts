@@ -280,7 +280,7 @@ describe("runAssistant tool loop", () => {
     expect(result.message.length).toBeGreaterThan(0);
   });
 
-  it("offers the model exactly the seven MCP tools", async () => {
+  it("offers an owner every MCP tool", async () => {
     const callModel = vi.fn().mockResolvedValue(textTurn("Hi."));
     await runAssistant({
       workspaceId: SESSION_WORKSPACE,
@@ -294,8 +294,12 @@ describe("runAssistant tool loop", () => {
     });
 
     const tools = callModel.mock.calls[0][0].tools;
-    expect(tools).toBe(MCP_TOOLS);
-    expect(tools).toHaveLength(7);
+    // Copies carrying MCP annotations, which the provider mapping in
+    // lib/ai/client.ts drops, so only name, description and schema are sent.
+    expect(tools.map((tool: { name: string }) => tool.name)).toEqual(
+      MCP_TOOLS.map((tool) => tool.name)
+    );
+    expect(tools).toHaveLength(8);
   });
 
   it("does not offer a MEMBER the tools that write", async () => {

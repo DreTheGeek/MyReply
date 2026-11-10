@@ -279,3 +279,62 @@ describe("unknown tools", () => {
     );
   });
 });
+
+describe("get_campaign", () => {
+  it("reads one campaign inside the caller's workspace, links in button order", async () => {
+    mockPrisma.automation.findFirst.mockResolvedValue({
+      id: "camp_1",
+      name: "Guide",
+      trackedLinks: [
+        { destinationUrl: "https://example.test/primary", label: "Primary", position: 0 },
+        { destinationUrl: "https://example.test/second", label: "Second", position: 1 },
+      ],
+    });
+
+    const result = await runMcpTool("get_campaign", { id: "camp_1" }, WS, MEMBER);
+
+    const query = mockPrisma.automation.findFirst.mock.calls[0][0];
+    expect(query.where).toEqual({ id: "camp_1", workspaceId: WS });
+    expect(query.select.trackedLinks.where).toEqual({ workspaceId: WS });
+    // Never hands out the share slug or the account's credentials.
+    expect(query.select.reportShareSlug).toBeUndefined();
+    expect(query.select.instagramAccount).toBeUndefined();
+    expect(result).toMatchObject({
+      trackedDestinationUrl: "https://example.test/primary",
+      secondaryDestinationUrl: "https://example.test/second",
+      secondaryButtonLabel: "Second",
+    });
+  });
+
+  it("reports a missing link as null rather than inventing one", async () => {
+    mockPrisma.automation.findFirst.mockResolvedValue({ id: "camp_1", trackedLinks: [] });
+    const result = await runMcpTool("get_campaign", { id: "camp_1" }, WS, MEMBER);
+    expect(result).toMatchObject({
+      trackedDestinationUrl: null,
+      secondaryDestinationUrl: null,
+      secondaryButtonLabel: null,
+    });
+  });
+
+  it("treats another workspace's campaign as unknown", async () => {
+    mockPrisma.automation.findFirst.mockResolvedValue(null);
+    await expect(
+      runMcpTool("get_campaign", { id: "someone_elses" }, WS, ADMIN)
+    ).rejects.toThrow(/Unknown campaign/);
+  });
+
+  it("refuses arguments that are not exactly a campaign id", async () => {
+    await expect(runMcpTool("get_campaign", {}, WS, ADMIN)).rejects.toThrow(/campaign id/);
+    await expect(
+      runMcpTool("get_campaign", { id: "camp_1", workspaceId: "other" }, WS, ADMIN)
+    ).rejects.toThrow(/campaign id/);
+    expect(mockPrisma.automation.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("is offered to a read-only key and marked read only", () => {
+    const tool = mcpToolsForRole(MEMBER).find((t) => t.name === "get_campaign");
+    expect(tool?.annotations?.readOnlyHint).toBe(true);
+    const write = mcpToolsForRole(ADMIN).find((t) => t.name === "create_campaign");
+    expect(write?.annotations?.readOnlyHint).toBe(false);
+  });
+});

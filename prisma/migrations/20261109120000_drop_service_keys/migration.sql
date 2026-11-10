@@ -1,0 +1,12 @@
+-- Retire upstream's ServiceKey table.
+--
+-- Upstream (#84) added a second machine credential, ServiceKey, for a
+-- read-only API and MCP. MyReply already had ApiKey: hashed at rest, carrying
+-- a role from the same ladder as a member, with MEMBER as the read-only key.
+-- Two key systems meant two auth paths to keep correct. The read-only tools
+-- and the per-key rate limit were ported onto ApiKey, so this table has no
+-- reader or writer left.
+--
+-- Safe to drop: it only ever held hashes of keys that no route accepts any
+-- more, and nothing references it.
+DROP TABLE IF EXISTS "ServiceKey";

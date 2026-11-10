@@ -30,6 +30,12 @@ import { resolveAccessToken, touchAccessToken } from "@/lib/oauth/tokens";
  */
 export interface McpCredential {
   kind: "api_key" | "oauth";
+  /**
+   * Stable identity for rate limiting. Never the secret. An OAuth connection
+   * is keyed by person and workspace rather than by access token, because the
+   * token rotates hourly and a limit keyed on it would reset with it.
+   */
+  credentialId: string;
   workspaceId: string;
   role: WorkspaceRole;
   scopes: string[] | null;
@@ -150,6 +156,7 @@ export async function authenticateMcpRequest(
       ok: true,
       credential: {
         kind: "api_key",
+        credentialId: `key:${context.apiKeyId}`,
         workspaceId: context.workspaceId,
         role: context.role,
         scopes: null,
@@ -220,6 +227,7 @@ export async function authenticateMcpRequest(
     ok: true,
     credential: {
       kind: "oauth",
+      credentialId: `oauth:${resolution.token.userId}:${resolution.token.workspaceId}`,
       workspaceId: resolution.token.workspaceId,
       // Scope narrows the live role and can never widen it.
       role: narrowRoleForScopes(role, scopes),

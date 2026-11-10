@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { consumeCredentialRequest, rateLimitRefusal } from "@/lib/api/rate-limit";
 import { getRequestApiKeyContext } from "@/lib/auth";
 import { getCurrentWorkspaceContext } from "@/lib/workspace-access";
 
@@ -37,6 +38,18 @@ export async function requireApiKey(): Promise<V1Caller | NextResponse> {
           "This endpoint requires an API key. Send it as: Authorization: Bearer mr_live_...",
       },
       { status: 401 }
+    );
+  }
+
+  // Counted once, here, at the one door every v1 handler goes through. The
+  // handlers it delegates to resolve the key again, and counting there would
+  // charge one call two or three times.
+  const decision = await consumeCredentialRequest(`key:${context.apiKeyId}`);
+  if (decision.status !== "allowed") {
+    const refusal = rateLimitRefusal(decision);
+    return NextResponse.json(
+      { success: false, error: refusal.message },
+      { status: refusal.status, headers: refusal.headers }
     );
   }
 

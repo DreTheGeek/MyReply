@@ -1,5 +1,7 @@
+import { z } from "zod";
 import type { WorkspaceRole } from "@/app/generated/prisma/client";
 import { prisma } from "@/lib/db/client";
+import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
 import { buildTrackedUrl } from "@/lib/tracking/message";
 import { generateTrackedLinkSlug } from "@/lib/tracking/server";
 import { generateReportShareSlug } from "@/lib/reports/share";
@@ -20,6 +22,13 @@ export interface McpTool {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  /** MCP tool hints, so a client can tell a read from a write before calling. */
+  annotations?: {
+    readOnlyHint: boolean;
+    destructiveHint: boolean;
+    idempotentHint: boolean;
+    openWorldHint: boolean;
+  };
 }
 
 export const MCP_TOOLS: McpTool[] = [
@@ -131,6 +140,17 @@ export const MCP_TOOLS: McpTool[] = [
     },
   },
   {
+    name: "get_campaign",
+    description:
+      "Read one campaign's complete settings: triggers, every message, the follow gate, the follow-up, public replies, and its destination links in the order they appear as buttons. A link that is not set comes back null, never guessed.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string", description: "Campaign id from list_campaigns." } },
+      required: ["id"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "get_campaign_performance",
     description:
       "How a campaign is doing: DMs sent, failures, skips and link clicks. Use this before suggesting a change, so advice is grounded in what actually happened.",
@@ -169,11 +189,28 @@ type ToolResult = Record<string, unknown>;
  */
 const WRITE_TOOLS = new Set(["create_campaign", "update_campaign"]);
 
+function withAnnotations(tool: McpTool): McpTool {
+  const write = WRITE_TOOLS.has(tool.name);
+  return {
+    ...tool,
+    annotations: {
+      readOnlyHint: !write,
+      destructiveHint: false,
+      idempotentHint: !write,
+      openWorldHint: false,
+    },
+  };
+}
+
 /** The tools a role may actually call, so a model is not offered what it cannot use. */
 export function mcpToolsForRole(role: WorkspaceRole): McpTool[] {
-  if (canManageWorkspace(role)) return MCP_TOOLS;
-  return MCP_TOOLS.filter((tool) => !WRITE_TOOLS.has(tool.name));
+  const allowed = canManageWorkspace(role)
+    ? MCP_TOOLS
+    : MCP_TOOLS.filter((tool) => !WRITE_TOOLS.has(tool.name));
+  return allowed.map(withAnnotations);
 }
+
+const getCampaignArgs = z.object({ id: z.string().min(1).max(100) }).strict();
 
 /**
  * Run a tool for one workspace. Throws on bad input so the caller can turn it
@@ -356,6 +393,70 @@ export async function runMcpTool(
         select: { id: true, name: true, keywords: true, isActive: true },
       });
       return { campaign };
+    }
+
+    case "get_campaign": {
+      const parsed = getCampaignArgs.safeParse(args);
+      if (!parsed.success) throw new Error("get_campaign needs a campaign id");
+
+      const campaign = await prisma.automation.findFirst({
+        where: { id: parsed.data.id, workspaceId },
+        select: {
+          id: true,
+          name: true,
+          goal: true,
+          instagramAccountId: true,
+          isActive: true,
+          postId: true,
+          postUrl: true,
+          pendingNextReel: true,
+          matchAnyPost: true,
+          keywords: true,
+          matchAnyWord: true,
+          wholeWordMatch: true,
+          dmTriggerEnabled: true,
+          storyReplyEnabled: true,
+          storyMentionEnabled: true,
+          liveCommentEnabled: true,
+          defaultReplyEnabled: true,
+          referralRef: true,
+          dmMessage: true,
+          openingDmEnabled: true,
+          openingDmMessage: true,
+          openingDmButtonLabel: true,
+          linkButtonLabel: true,
+          quickRepliesEnabled: true,
+          quickReplies: true,
+          attachmentUrl: true,
+          requireFollow: true,
+          followPromptMessage: true,
+          followPromptButtonLabel: true,
+          followUpEnabled: true,
+          followUpMessage: true,
+          followUpDelayMinutes: true,
+          publicReplyEnabled: true,
+          publicReplyMessage: true,
+          publicReplyMessages: true,
+          createdAt: true,
+          updatedAt: true,
+          trackedLinks: {
+            // Scoped twice on purpose: a link row names its own workspace,
+            // and a tenant mismatch there must read as no link, not a leak.
+            where: { workspaceId },
+            orderBy: TRACKED_LINK_ORDER,
+            select: { destinationUrl: true, label: true, position: true },
+          },
+        },
+      });
+      if (!campaign) throw new Error("Unknown campaign for this workspace");
+
+      const [primary, secondary] = campaign.trackedLinks;
+      return {
+        ...campaign,
+        trackedDestinationUrl: primary?.destinationUrl ?? null,
+        secondaryDestinationUrl: secondary?.destinationUrl ?? null,
+        secondaryButtonLabel: secondary?.label ?? null,
+      };
     }
 
     case "get_campaign_performance": {
