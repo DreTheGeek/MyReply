@@ -4,17 +4,10 @@ import {
   canManageWorkspace,
   getCurrentWorkspaceContext,
 } from "@/lib/workspace-access";
-import {
-  releaseWorkspaceDMReservation,
-  reserveWorkspaceDMSend,
-} from "@/lib/billing/usage";
-import { reserveDMSlot } from "@/lib/utils/rate-limiter";
 import { getCurrentWorkspaceId } from "@/lib/auth";
 import { getWorkspaceInstagramAccount } from "@/lib/instagram-accounts";
-import { getChannelCapabilities } from "@/lib/channels/capabilities";
 import { getChannelAdapter, openChannel } from "@/lib/channels/registry";
-import { isHumanAgentApproved, messagingWindow } from "@/lib/channels/windows";
-import { prisma } from "@/lib/db/client";
+import { sendInboxReply } from "@/lib/messaging/inbox-send";
 
 export interface ConversationListItem {
   id: string;
@@ -159,101 +152,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { recipientId, text } = parsed.data;
-
-  const account = await getWorkspaceInstagramAccount(
-    context.workspaceId,
-    parsed.data.instagramAccountId ?? null
-  );
-  if (!account) {
-    return NextResponse.json(
-      { success: false, error: "Instagram account not connected." },
-      { status: 400 }
-    );
-  }
-
-  // A person is replying, so the platform's human rules apply: inside 24 hours
-  // of their last message it is an ordinary reply; after that, only inside the
-  // human agent window, and only once the app is approved for it. A
-  // conversation with no recorded inbound (it predates the record) is sent as
-  // is and the platform decides.
-  const contact = await prisma.contact.findUnique({
-    where: {
-      instagramAccountId_externalId: {
-        instagramAccountId: account.id,
-        externalId: recipientId,
-      },
-    },
-    select: { lastInboundAt: true },
+  const result = await sendInboxReply({
+    workspaceId: context.workspaceId,
+    accountId: parsed.data.instagramAccountId ?? null,
+    recipientId: parsed.data.recipientId,
+    text: parsed.data.text,
   });
-  let humanAgent = false;
-  if (contact?.lastInboundAt) {
-    const decision = messagingWindow({
-      capabilities: getChannelCapabilities(account.platform),
-      lastInboundAt: contact.lastInboundAt,
-      now: new Date(),
-      sender: "human",
-      humanAgentApproved: isHumanAgentApproved(),
-    });
-    if (!decision.allowed) {
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            "This conversation can't be answered any more. They need to message you again before you can reply.",
-        },
-        { status: 409 }
-      );
-    }
-    humanAgent = decision.humanAgentTag;
+  if (!result.ok) {
+    return NextResponse.json({ success: false, error: result.error }, { status: result.status });
   }
-
-  // Same order the worker uses: the workspace budget first, then the per
-  // account slot, so a rejected send releases the workspace reservation rather
-  // than silently consuming it.
-  const usage = await reserveWorkspaceDMSend(context.workspaceId);
-  if (!usage.allowed) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "This workspace has used its DM allowance for the period.",
-      },
-      { status: 429 }
-    );
-  }
-
-  const slot = await reserveDMSlot(account.instagramId).catch(() => null);
-  if (!slot || !slot.allowed) {
-    await releaseWorkspaceDMReservation(context.workspaceId, usage.periodStart);
-    return NextResponse.json(
-      {
-        success: false,
-        error:
-          "This account has reached Instagram's hourly message limit. Try again shortly.",
-      },
-      { status: 429 }
-    );
-  }
-
-  try {
-    const channel = await openChannel(account, { source: "inbox" });
-    const result = await channel.adapter.messaging.send(channel.context, {
-      to: { kind: "user", userId: recipientId },
-      content: { kind: "text", text },
-      humanAgent,
-    });
-    return NextResponse.json({ success: true, data: result });
-  } catch (err) {
-    await releaseWorkspaceDMReservation(context.workspaceId, usage.periodStart);
-    console.error("[Conversations] Send error:", err);
-    // Surface Meta's own message, the common case is the 24-hour messaging
-    // window having closed, which the user needs to see explicitly.
-    const message =
-      getChannelAdapter(account.platform).errors.userMessage(err) ??
-      "Failed to send message";
-    return NextResponse.json(
-      { success: false, error: message },
-      { status: 502 }
-    );
-  }
+  return NextResponse.json({ success: true, data: result.receipt });
 }
