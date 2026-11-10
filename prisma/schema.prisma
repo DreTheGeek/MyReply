@@ -301,9 +301,17 @@ model WorkspaceInvitation {
   @@index([status])
 }
 
+/// A connected messaging account on any platform.
+///
+/// Named InstagramAccount because Instagram was the only platform when it was
+/// created. `platform` says which one it is, and `instagramId` holds the
+/// platform's own id for the account, whatever the platform. The rename to a
+/// neutral name waits until a second platform's rows exist, so it can be done
+/// once, with data, rather than guessed at.
 model InstagramAccount {
   id                String    @id @default(cuid())
   workspaceId       String
+  platform          ChannelPlatform @default(INSTAGRAM)
   instagramId       String    @unique
   username          String
   name              String?
@@ -654,6 +662,12 @@ model WorkspaceAiCredential {
 enum OutboundMessageSource {
   AUTOMATION
   MANUAL
+}
+
+/// Mirrored by CHANNEL_PLATFORMS in lib/channels/platforms.ts; the channel
+/// registry fails to compile if the two drift apart.
+enum ChannelPlatform {
+  INSTAGRAM
 }
 
 enum AiProvider {

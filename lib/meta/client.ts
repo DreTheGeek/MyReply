@@ -1136,3 +1136,82 @@ export async function debugToken(inputToken: string, accessToken: string) {
   const response = await fetch(url.toString());
   return handleResponse(response);
 }
+
+type RawStarter = {
+  question?: unknown;
+  payload?: unknown;
+  call_to_actions?: unknown;
+};
+
+/**
+ * Normalise whatever Meta hands back into our own shape. Messenger nests the
+ * prompts under a per-locale `call_to_actions` array while Instagram returns
+ * them flat, and the same account id can answer in either shape depending on
+ * how it was connected, so accept both.
+ */
+function toStarters(raw: unknown): ConversationStarter[] {
+  if (!Array.isArray(raw)) return [];
+
+  const starters: ConversationStarter[] = [];
+  for (const entry of raw as RawStarter[]) {
+    if (Array.isArray(entry?.call_to_actions)) {
+      starters.push(...toStarters(entry.call_to_actions));
+      continue;
+    }
+    if (
+      typeof entry?.question === "string" &&
+      typeof entry?.payload === "string"
+    ) {
+      starters.push({ question: entry.question, payload: entry.payload });
+    }
+  }
+  return starters;
+}
+
+/**
+ * Read the account's current starters back from Meta.
+ *
+ * Honest note on the approach: Meta documents a GET on `messenger_profile` with
+ * `fields=ice_breakers`, and that is what this does, but it has not been
+ * verified against a live Instagram Login account here. Reports of it answering
+ * with an empty payload on accounts that demonstrably have starters set are
+ * common enough that we do not treat a failed read as "none configured".
+ * Starters are not mirrored in our database (they live only on the Instagram
+ * profile), so there is no last-saved copy to fall back on: a read that throws,
+ * 4xxs, or comes back in a shape we do not recognise returns null, the route
+ * reports `readable: false`, and the UI degrades to a write-only editor.
+ *
+ */
+export async function getConversationStarters(
+  accessToken: string,
+  instagramAccountId: string
+): Promise<ConversationStarter[] | null> {
+  const url = new URL(
+    `${instagramGraphBase()}/${instagramAccountId}/messenger_profile`
+  );
+  url.searchParams.set("platform", "instagram");
+  url.searchParams.set("fields", "ice_breakers");
+  url.searchParams.set("access_token", accessToken);
+
+  try {
+    const response = await fetch(url.toString());
+    if (!response.ok) return null;
+
+    const body: unknown = await response.json();
+    const entries = (body as { data?: unknown })?.data;
+    // An array is the success signal, including an empty one: Meta returns
+    // `{"data":[]}` for a profile with the field genuinely unset.
+    if (!Array.isArray(entries)) return null;
+
+    const field = (entries as Array<{ ice_breakers?: unknown }>).find((entry) =>
+      Array.isArray(entry?.ice_breakers)
+    );
+    return field ? toStarters(field.ice_breakers) : [];
+  } catch (err) {
+    console.warn(
+      "[ConversationStarters] Read unavailable:",
+      err instanceof Error ? err.message : err
+    );
+    return null;
+  }
+}
