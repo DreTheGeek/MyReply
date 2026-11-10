@@ -1,14 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getWorkspaceInstagramAccount } from "@/lib/instagram-accounts";
+import { getChannelCapabilities } from "@/lib/channels/capabilities";
+import type { IceBreaker } from "@/lib/channels/content";
 import {
-  clearConversationStarters,
-  setConversationStarters,
-  MetaApiError,
-  type ConversationStarter,
-  getConversationStarters,
-} from "@/lib/meta/client";
-import { decryptToken } from "@/lib/meta/oauth";
+  openProfileSettings,
+  profileSettingsUnsupported,
+} from "@/lib/channels/profile-settings";
 import {
   canManageWorkspace,
   getCurrentWorkspaceContext,
@@ -16,16 +14,16 @@ import {
 
 export const runtime = "nodejs";
 
-// Meta's own ceiling. Instagram shows at most four prompts on a fresh thread,
-// and setConversationStarters silently truncates past it, so reject the
-// overflow here instead of pretending we saved something we did not.
-const MAX_STARTERS = 4;
-
-// Instagram caps a starter question at 80 characters. The payload is ours, and
-// only comes back to us as a postback, so it gets the same 1000-char ceiling
-// the campaign message fields use.
-const MAX_QUESTION_LENGTH = 80;
-const MAX_PAYLOAD_LENGTH = 1000;
+// Instagram's ceilings, from its channel capabilities. Instagram shows at most
+// four prompts on a fresh thread and truncates past it, so the overflow is
+// refused here instead of pretending we saved something we did not. A
+// question is capped at 80 characters; the payload is ours, and only comes
+// back to us as a postback, so it gets the 1000-char ceiling campaign message
+// fields use.
+const LIMITS = getChannelCapabilities("INSTAGRAM").iceBreakers;
+const MAX_STARTERS = LIMITS.max;
+const MAX_QUESTION_LENGTH = LIMITS.questionMax;
+const MAX_PAYLOAD_LENGTH = LIMITS.payloadMax;
 
 // "all" is the account-selector sentinel meaning "no account in particular". It
 // resolves to whichever account connected most recently, which is not something
@@ -53,7 +51,7 @@ const deleteSchema = z.object({
 
 export interface ConversationStartersResponse {
   account: { id: string; username: string };
-  starters: ConversationStarter[];
+  starters: IceBreaker[];
   /**
    * False when we could not read the live set back from Meta. The UI shows the
    * section as write-only in that case rather than presenting an empty list as
@@ -86,10 +84,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const starters = await getConversationStarters(
-    decryptToken(account.accessToken),
-    account.instagramId
-  );
+  const opened = await openProfileSettings(account);
+  if (!opened) return profileSettingsUnsupported();
+  const starters = await opened.settings.iceBreakers(opened.context);
 
   const data: ConversationStartersResponse = {
     account: { id: account.id, username: account.username },
@@ -143,21 +140,18 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     );
   }
 
+  const opened = await openProfileSettings(account);
+  if (!opened) return profileSettingsUnsupported();
+
   try {
-    await setConversationStarters(
-      decryptToken(account.accessToken),
-      account.instagramId,
-      parsed.data.starters
-    );
+    await opened.settings.setIceBreakers(opened.context, parsed.data.starters);
   } catch (err) {
     console.error("[ConversationStarters] Save error:", err);
     // Meta's own message is worth surfacing here. The usual failures are a
     // missing messaging permission or an expired token, both of which the user
     // has to act on themselves.
     const message =
-      err instanceof MetaApiError
-        ? err.message
-        : "Failed to save conversation starters";
+      opened.errors.userMessage(err) ?? "Failed to save conversation starters";
     return NextResponse.json({ success: false, error: message }, { status: 502 });
   }
 
@@ -211,17 +205,15 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
     );
   }
 
+  const opened = await openProfileSettings(account);
+  if (!opened) return profileSettingsUnsupported();
+
   try {
-    await clearConversationStarters(
-      decryptToken(account.accessToken),
-      account.instagramId
-    );
+    await opened.settings.clearIceBreakers(opened.context);
   } catch (err) {
     console.error("[ConversationStarters] Clear error:", err);
     const message =
-      err instanceof MetaApiError
-        ? err.message
-        : "Failed to clear conversation starters";
+      opened.errors.userMessage(err) ?? "Failed to clear conversation starters";
     return NextResponse.json({ success: false, error: message }, { status: 502 });
   }
 

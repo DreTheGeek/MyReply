@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
 import { isCronRequest } from "@/lib/security/cron-auth";
-import { createInstagramContext, getUserInfo } from "@/lib/instagram/provider";
+import { openChannel } from "@/lib/channels/registry";
 import {
   backfillFollowerHistory,
   recordFollowerSnapshot,
@@ -35,6 +35,7 @@ export async function GET(request: NextRequest) {
       username: true,
       instagramId: true,
       accessToken: true,
+      platform: true,
     },
     // Unbounded and serial, one Meta call each, in a serverless handler on a
     // 120 second pg_cron timeout. At a few hundred accounts it timed out mid
@@ -53,10 +54,10 @@ export async function GET(request: NextRequest) {
 
   for (const account of accounts) {
     try {
-      const token = await createInstagramContext(account);
-      const info = await getUserInfo({ context: token });
+      const channel = await openChannel(account);
+      const profile = await channel.adapter.content.profile(channel.context);
 
-      if (typeof info.followers_count !== "number") {
+      if (profile.followersCount === null) {
         failures.push({
           username: account.username,
           reason: "followers_count not returned",
@@ -64,7 +65,7 @@ export async function GET(request: NextRequest) {
         continue;
       }
 
-      await recordFollowerSnapshot(account.id, info.followers_count);
+      await recordFollowerSnapshot(account.id, profile.followersCount);
       recorded += 1;
 
       // First time we see this account, try to recover the last 30 days.
@@ -74,9 +75,8 @@ export async function GET(request: NextRequest) {
       if (existing <= 1) {
         backfilled += await backfillFollowerHistory({
           instagramAccountId: account.id,
-          accessToken: token,
-          instagramId: account.instagramId,
-          currentFollowers: info.followers_count,
+          channel,
+          currentFollowers: profile.followersCount,
         });
       }
     } catch (err) {

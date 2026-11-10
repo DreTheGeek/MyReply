@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentWorkspaceId } from "@/lib/auth";
 import { getWorkspaceInstagramAccount } from "@/lib/instagram-accounts";
-import {
-  getConversationMessages,
-  MetaApiError,
-} from "@/lib/instagram/provider";
-import { createInstagramContext } from "@/lib/instagram/provider";
+import { getChannelAdapter, openChannel } from "@/lib/channels/registry";
 
 export interface ThreadMessage {
   id: string;
@@ -44,21 +40,26 @@ export async function GET(request: NextRequest, { params }: RouteProps) {
     );
   }
 
+  const adapter = getChannelAdapter(account.platform);
+  if (!adapter.inbox) {
+    return NextResponse.json(
+      { success: false, error: "This account's platform has no inbox to read." },
+      { status: 400 }
+    );
+  }
+
   try {
-    const accessToken = await createInstagramContext(account);
-    const raw = await getConversationMessages({
-      context: accessToken,
-      conversationId: conversationId,
-    });
+    const channel = await openChannel(account);
+    const raw = await adapter.inbox.messages(channel.context, conversationId);
 
     // The API returns newest-first; reverse to read top-to-bottom.
     const messages: ThreadMessage[] = raw
       .map((m) => ({
         id: m.id,
-        text: m.message ?? "",
-        fromMe: m.from?.id === account.instagramId,
-        fromUsername: m.from?.username ?? null,
-        createdTime: m.created_time ?? null,
+        text: m.text ?? "",
+        fromMe: m.fromId === account.instagramId,
+        fromUsername: m.fromUsername,
+        createdTime: m.createdAt,
       }))
       .reverse();
 
@@ -67,7 +68,7 @@ export async function GET(request: NextRequest, { params }: RouteProps) {
   } catch (err) {
     console.error("[Conversation Messages] Error:", err);
     const message =
-      err instanceof MetaApiError ? err.message : "Failed to load messages";
+      adapter.errors.userMessage(err) ?? "Failed to load messages";
     return NextResponse.json(
       { success: false, error: message },
       { status: 500 }

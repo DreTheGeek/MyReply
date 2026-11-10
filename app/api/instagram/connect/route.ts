@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { canManageWorkspace, getCurrentWorkspaceContext } from "@/lib/workspace-access";
 import { getBaseUrl, getMissingInstagramOAuthEnv } from "@/lib/env";
-import { createOAuthState, getAuthorizationUrl } from "@/lib/meta/oauth";
+import { getChannelAdapter } from "@/lib/channels/registry";
+import { createOAuthState } from "@/lib/security/oauth-state";
 
 export async function GET() {
   const context = await getCurrentWorkspaceContext();
@@ -27,5 +28,7 @@ export async function GET() {
   const redirectUri = `${getBaseUrl()}/api/instagram/callback`;
   const state = createOAuthState(context.workspaceId);
 
-  return NextResponse.redirect(getAuthorizationUrl(redirectUri, state));
+  return NextResponse.redirect(
+    getChannelAdapter("INSTAGRAM").auth.authorizationUrl({ redirectUri, state })
+  );
 }

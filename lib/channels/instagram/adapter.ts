@@ -229,6 +229,7 @@ function toChannelMessage(message: meta.InstagramMessage): ChannelMessage {
     id: message.id,
     text: message.message ?? null,
     fromId: message.from?.id ?? null,
+    fromUsername: message.from?.username ?? null,
     createdAt: message.created_time ?? null,
   };
 }
@@ -466,6 +467,12 @@ export const instagramAdapter: ChannelAdapter = {
         /template|button/i.test(error.message) &&
         !NON_TEMPLATE_REJECTIONS.some((pattern) => pattern.test(error.message))
       );
+    },
+    isPermissionDenied(error) {
+      return error instanceof meta.PermissionError;
+    },
+    userMessage(error) {
+      return error instanceof meta.MetaApiError ? error.message : null;
     },
     isLegacyUnconfirmed(errorMessage) {
       return Boolean(

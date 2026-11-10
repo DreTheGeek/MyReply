@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getWorkspaceInstagramAccount } from "@/lib/instagram-accounts";
-import { decryptToken } from "@/lib/meta/oauth";
+import { openChannel } from "@/lib/channels/registry";
 import {
   onboardingCacheKey,
   withOnboardingCache,
@@ -71,7 +71,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       `${onboardingCacheKey(context.workspaceId, account.id)}:${tone}`,
       async () =>
         suggestOnboardingDrafts({
-          accessToken: decryptToken(account.accessToken),
+          channel: await openChannel(account),
           account: { id: account.id, username: account.username },
           tone,
         })

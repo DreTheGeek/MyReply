@@ -11,12 +11,7 @@ import {
 import { reserveDMSlot } from "@/lib/utils/rate-limiter";
 import { getCurrentWorkspaceId } from "@/lib/auth";
 import { getWorkspaceInstagramAccount } from "@/lib/instagram-accounts";
-import {
-  getConversations,
-  sendDirectMessage,
-  MetaApiError,
-} from "@/lib/instagram/provider";
-import { createInstagramContext } from "@/lib/instagram/provider";
+import { getChannelAdapter, openChannel } from "@/lib/channels/registry";
 
 export interface ConversationListItem {
   id: string;
@@ -56,18 +51,22 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const adapter = getChannelAdapter(account.platform);
+  if (!adapter.inbox) {
+    return NextResponse.json(
+      { success: false, error: "This account's platform has no inbox to read." },
+      { status: 400 }
+    );
+  }
+
   try {
-    const accessToken = await createInstagramContext(account);
-    const raw = await getConversations({
-      context: accessToken,
-      igUserId: account.instagramId,
-    });
+    const channel = await openChannel(account);
+    const raw = await adapter.inbox.conversations(channel.context);
 
     const conversations: ConversationListItem[] = raw.map((c) => {
-      const participants = c.participants?.data ?? [];
       const contact =
-        participants.find((p) => p.id !== account.instagramId) ?? null;
-      const last = c.messages?.data?.[0] ?? null;
+        c.participants.find((p) => p.id !== account.instagramId) ?? null;
+      const last = c.messages[0] ?? null;
 
       return {
         id: c.id,
@@ -76,12 +75,12 @@ export async function GET(request: NextRequest) {
           id: contact?.id ?? "",
           username: contact?.username ?? null,
         },
-        updatedTime: c.updated_time ?? null,
+        updatedTime: c.updatedAt,
         lastMessage: last
           ? {
-              text: last.message ?? "",
-              fromMe: last.from?.id === account.instagramId,
-              createdTime: last.created_time ?? null,
+              text: last.text ?? "",
+              fromMe: last.fromId === account.instagramId,
+              createdTime: last.createdAt,
             }
           : null,
       };
@@ -99,9 +98,7 @@ export async function GET(request: NextRequest) {
   } catch (err) {
     console.error("[Conversations] Error:", err);
     const message =
-      err instanceof MetaApiError
-        ? err.message
-        : "Failed to load conversations";
+      adapter.errors.userMessage(err) ?? "Failed to load conversations";
     return NextResponse.json(
       { success: false, error: message },
       { status: 500 }
@@ -200,12 +197,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const accessToken = await createInstagramContext(account);
-    const result = await sendDirectMessage({
-      context: accessToken,
-      instagramAccountId: account.instagramId,
-      userId: recipientId,
-      message: text,
+    const channel = await openChannel(account);
+    const result = await channel.adapter.messaging.send(channel.context, {
+      to: { kind: "user", userId: recipientId },
+      content: { kind: "text", text },
     });
     return NextResponse.json({ success: true, data: result });
   } catch (err) {
@@ -214,7 +209,8 @@ export async function POST(request: NextRequest) {
     // Surface Meta's own message, the common case is the 24-hour messaging
     // window having closed, which the user needs to see explicitly.
     const message =
-      err instanceof MetaApiError ? err.message : "Failed to send message";
+      getChannelAdapter(account.platform).errors.userMessage(err) ??
+      "Failed to send message";
     return NextResponse.json(
       { success: false, error: message },
       { status: 502 }

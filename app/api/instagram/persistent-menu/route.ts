@@ -1,17 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getWorkspaceInstagramAccount } from "@/lib/instagram-accounts";
-import { MetaApiError } from "@/lib/meta/client";
+import { getChannelCapabilities } from "@/lib/channels/capabilities";
+import type { MenuItem } from "@/lib/channels/content";
 import {
-  clearPersistentMenu,
-  getPersistentMenu,
-  setPersistentMenu,
-  MAX_MENU_ITEM_PAYLOAD,
-  MAX_MENU_ITEM_TITLE,
-  MAX_PERSISTENT_MENU_ITEMS,
-  type PersistentMenuItem,
-} from "@/lib/meta/persistent-menu";
-import { decryptToken } from "@/lib/meta/oauth";
+  openProfileSettings,
+  profileSettingsUnsupported,
+} from "@/lib/channels/profile-settings";
 import {
   canManageWorkspace,
   getCurrentWorkspaceContext,
@@ -26,6 +21,12 @@ const accountIdSchema = z
   .string()
   .min(1)
   .refine((value) => value !== "all", "Choose a specific account");
+
+// Instagram's ceilings, from its channel capabilities.
+const LIMITS = getChannelCapabilities("INSTAGRAM").persistentMenu;
+const MAX_PERSISTENT_MENU_ITEMS = LIMITS.maxItems;
+const MAX_MENU_ITEM_TITLE = LIMITS.titleMax;
+const MAX_MENU_ITEM_PAYLOAD = LIMITS.payloadMax;
 
 const titleSchema = z.string().trim().min(1).max(MAX_MENU_ITEM_TITLE);
 
@@ -62,7 +63,7 @@ const deleteSchema = z.object({
 
 export interface PersistentMenuResponse {
   account: { id: string; username: string };
-  items: PersistentMenuItem[];
+  items: MenuItem[];
   /**
    * False when we could not read the live menu back from Meta. The UI shows the
    * section as write-only in that case rather than presenting an empty list as
@@ -95,10 +96,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const items = await getPersistentMenu(
-    decryptToken(account.accessToken),
-    account.instagramId
-  );
+  const opened = await openProfileSettings(account);
+  if (!opened) return profileSettingsUnsupported();
+  const items = await opened.settings.persistentMenu(opened.context);
 
   const data: PersistentMenuResponse = {
     account: { id: account.id, username: account.username },
@@ -152,21 +152,18 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     );
   }
 
+  const opened = await openProfileSettings(account);
+  if (!opened) return profileSettingsUnsupported();
+
   try {
-    await setPersistentMenu(
-      decryptToken(account.accessToken),
-      account.instagramId,
-      parsed.data.items
-    );
+    await opened.settings.setPersistentMenu(opened.context, parsed.data.items);
   } catch (err) {
     console.error("[PersistentMenu] Save error:", err);
     // Meta's own message is worth surfacing here. The usual failures are a
     // missing messaging permission or an expired token, both of which the user
     // has to act on themselves.
     const message =
-      err instanceof MetaApiError
-        ? err.message
-        : "Failed to save the persistent menu";
+      opened.errors.userMessage(err) ?? "Failed to save the persistent menu";
     return NextResponse.json({ success: false, error: message }, { status: 502 });
   }
 
@@ -220,17 +217,15 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
     );
   }
 
+  const opened = await openProfileSettings(account);
+  if (!opened) return profileSettingsUnsupported();
+
   try {
-    await clearPersistentMenu(
-      decryptToken(account.accessToken),
-      account.instagramId
-    );
+    await opened.settings.clearPersistentMenu(opened.context);
   } catch (err) {
     console.error("[PersistentMenu] Clear error:", err);
     const message =
-      err instanceof MetaApiError
-        ? err.message
-        : "Failed to clear the persistent menu";
+      opened.errors.userMessage(err) ?? "Failed to clear the persistent menu";
     return NextResponse.json({ success: false, error: message }, { status: 502 });
   }
 

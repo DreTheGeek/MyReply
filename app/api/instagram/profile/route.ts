@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentWorkspaceId } from "@/lib/auth";
 import { getWorkspaceInstagramAccount } from "@/lib/instagram-accounts";
-import { getUserInfo } from "@/lib/instagram/provider";
-import { createInstagramContext } from "@/lib/instagram/provider";
+import { openChannel } from "@/lib/channels/registry";
 
 export const dynamic = "force-dynamic";
 
@@ -28,15 +27,15 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const token = await createInstagramContext(account);
-    const info = await getUserInfo({ context: token });
+    const channel = await openChannel(account);
+    const info = await channel.adapter.content.profile(channel.context);
     return NextResponse.json(
       {
         success: true,
         data: {
           username: info.username,
-          name: info.name ?? null,
-          profilePictureUrl: info.profile_picture_url ?? null,
+          name: info.name,
+          profilePictureUrl: info.profilePictureUrl,
         },
       },
       { headers: { "Cache-Control": "private, max-age=300" } }

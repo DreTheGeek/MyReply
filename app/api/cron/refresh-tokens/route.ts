@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
 import { isCronRequest } from "@/lib/security/cron-auth";
-import { decryptToken, encryptToken } from "@/lib/meta/oauth";
-import {
-  refreshLongLivedToken,
-  subscribeInstagramAccountToWebhooks,
-} from "@/lib/meta/client";
+import { openChannel } from "@/lib/channels/registry";
+import { encryptToken } from "@/lib/security/token-crypto";
 
 const DAYS_BEFORE_EXPIRY = 10;
 
@@ -50,6 +47,7 @@ export async function GET(request: NextRequest) {
       username: true,
       instagramId: true,
       accessToken: true,
+      platform: true,
     },
     // Soonest to expire first, with a ceiling. This ran unbounded and serially,
     // one Meta call per account, inside a serverless handler on a 120 second
@@ -72,11 +70,10 @@ export async function GET(request: NextRequest) {
 
   for (const account of accountsToRefresh) {
     try {
-      const currentToken = decryptToken(account.accessToken);
-      const { accessToken: newToken, expiresIn } =
-        await refreshLongLivedToken(currentToken);
+      const channel = await openChannel(account);
+      const { accessToken: newToken, expiresAt: newExpiry } =
+        await channel.adapter.auth.refreshToken(channel.context);
       const encryptedToken = encryptToken(newToken);
-      const newExpiry = new Date(Date.now() + expiresIn * 1000);
 
       await prisma.instagramAccount.update({
         where: { id: account.id },
@@ -92,10 +89,10 @@ export async function GET(request: NextRequest) {
       // is a trigger that silently never fires. Failure here must not fail the
       // refresh, which is the job that actually keeps the account working.
       try {
-        await subscribeInstagramAccountToWebhooks(
-          account.instagramId,
-          newToken
-        );
+        await channel.adapter.auth.subscribeToEvents({
+          ...channel.context,
+          accessToken: newToken,
+        });
       } catch (subscribeError) {
         console.warn(
           `[cron] Webhook resubscribe failed for @${account.username}:`,

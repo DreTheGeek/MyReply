@@ -58,8 +58,19 @@ export interface ChannelCapabilities {
   /** Can the engine ask whether a person follows the account. */
   followGate: boolean;
   /** Suggested first questions shown on a new conversation. */
-  iceBreakers: boolean;
-  persistentMenu: boolean;
+  iceBreakers: {
+    supported: boolean;
+    max: number;
+    questionMax: number;
+    payloadMax: number;
+  };
+  /** An always-visible menu in the conversation. */
+  persistentMenu: {
+    supported: boolean;
+    maxItems: number;
+    titleMax: number;
+    payloadMax: number;
+  };
   /** Conversations can be listed and read through the API. */
   inbox: boolean;
 
@@ -119,8 +130,8 @@ const INSTAGRAM: ChannelCapabilities = {
   },
   media: { image: true, video: true, audio: true, file: true },
   followGate: true,
-  iceBreakers: true,
-  persistentMenu: true,
+  iceBreakers: { supported: true, max: 4, questionMax: 80, payloadMax: 1000 },
+  persistentMenu: { supported: true, maxItems: 5, titleMax: 30, payloadMax: 1000 },
   inbox: true,
   window: { standardHours: 24, privateReplyDays: 7, humanAgentDays: null },
   rateLimits: { privateRepliesPerHour: 750 },

@@ -25,7 +25,8 @@
  *    empty state.
  */
 
-import { getUserMedia, type InstagramMedia } from "@/lib/meta/client";
+import type { ChannelMedia } from "@/lib/channels/content";
+import type { OpenChannel } from "@/lib/channels/registry";
 import {
   DEFAULT_TONE,
   GOAL_CARDS,
@@ -57,18 +58,18 @@ export const POSTS_TO_READ = 12;
 const CAPTION_EXCERPT_LENGTH = 140;
 
 interface SuggestParams {
-  /** Decrypted Instagram token for the account being read. */
-  accessToken: string;
+  /** The account being read, opened through its channel adapter. */
+  channel: OpenChannel;
   account: { id: string; username: string };
   /** The workspace's chosen voice. Every DM is written in it. */
   tone?: Tone;
 }
 
 /** What Instagram calls this thing, in words a person would use. */
-function mediaLabel(media: InstagramMedia): string {
-  if (media.media_product_type === "REELS") return "reel";
-  if (media.media_type === "CAROUSEL_ALBUM") return "carousel";
-  if (media.media_type === "VIDEO") return "video";
+function mediaLabel(media: ChannelMedia): string {
+  if (media.isReel) return "reel";
+  if (media.mediaType === "CAROUSEL") return "carousel";
+  if (media.mediaType === "VIDEO") return "video";
   return "post";
 }
 
@@ -81,7 +82,7 @@ function postedOnLabel(timestamp: string): string | null {
   });
 }
 
-function excerpt(caption: string | undefined): string | null {
+function excerpt(caption: string | null): string | null {
   const text = caption?.replace(/\s+/g, " ").trim();
   if (!text) return null;
   return text.length <= CAPTION_EXCERPT_LENGTH
@@ -94,20 +95,20 @@ function excerpt(caption: string | undefined): string | null {
  * absent count is null rather than zero: zero is a measurement, and claiming
  * one where none was made is exactly what this engine must not do.
  */
-function measuredCount(value: number | undefined): number | null {
+function measuredCount(value: number | null): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function toDraftPost(media: InstagramMedia): DraftPost {
+function toDraftPost(media: ChannelMedia): DraftPost {
   return {
     id: media.id,
-    permalink: media.permalink ?? null,
-    thumbnailUrl: media.thumbnail_url ?? media.media_url ?? null,
+    permalink: media.permalink,
+    thumbnailUrl: media.thumbnailUrl ?? media.mediaUrl,
     mediaType: mediaLabel(media),
     captionExcerpt: excerpt(media.caption),
     postedAt: media.timestamp,
-    commentsCount: measuredCount(media.comments_count),
-    likeCount: measuredCount(media.like_count),
+    commentsCount: measuredCount(media.commentsCount),
+    likeCount: measuredCount(media.likeCount),
   };
 }
 
@@ -125,7 +126,7 @@ function joinWords(words: string[]): string {
  * those comments asked for.
  */
 function buildPostContext(
-  media: InstagramMedia,
+  media: ChannelMedia,
   signals: string[],
   comments: number | null
 ): string {
@@ -169,7 +170,7 @@ export function stripLinkToken(message: string): string {
 
 interface BuildDraftParams {
   goal: Goal;
-  media: InstagramMedia | null;
+  media: ChannelMedia | null;
   signals: string[];
   tone: Tone;
 }
@@ -222,7 +223,7 @@ function buildDraft({
     // draft, so a draft cannot name another tenant's account.
     instagramAccountId: null,
     postId: targetsPost ? media.id : null,
-    postUrl: targetsPost ? (media.permalink ?? null) : null,
+    postUrl: targetsPost ? media.permalink : null,
     matchAnyPost: !targetsPost,
     keywords: built.keywords,
     matchAnyWord: built.matchAnyWord,
@@ -250,7 +251,7 @@ function buildDraft({
     title: card.label,
     summary: outcomeSentence(goal, keyword, target),
     postContext: media
-      ? buildPostContext(media, signals, measuredCount(media.comments_count))
+      ? buildPostContext(media, signals, measuredCount(media.commentsCount))
       : null,
     keyword,
     needsLink,
@@ -262,7 +263,7 @@ function buildDraft({
 }
 
 interface Candidate {
-  media: InstagramMedia;
+  media: ChannelMedia;
   goal: Goal;
   signals: string[];
   score: number;
@@ -304,7 +305,7 @@ function scoreCandidate(
  *   3. Any-post drafts, which need no post at all and are what a brand new
  *      account gets for all five.
  */
-function selectDrafts(media: InstagramMedia[], tone: Tone): OnboardingDraft[] {
+function selectDrafts(media: ChannelMedia[], tone: Tone): OnboardingDraft[] {
   const candidates: Candidate[] = [];
 
   media.forEach((item, index) => {
@@ -380,15 +381,17 @@ function selectDrafts(media: InstagramMedia[], tone: Tone): OnboardingDraft[] {
  * rather than implying it read captions it never saw.
  */
 export async function suggestOnboardingDrafts({
-  accessToken,
+  channel,
   account,
   tone = DEFAULT_TONE,
 }: SuggestParams): Promise<OnboardingSuggestions> {
-  let media: InstagramMedia[] = [];
+  let media: ChannelMedia[] = [];
   let reachedInstagram = true;
 
   try {
-    media = await getUserMedia(accessToken, POSTS_TO_READ);
+    media = await channel.adapter.content.recentMedia(channel.context, {
+      limit: POSTS_TO_READ,
+    });
   } catch (error) {
     // An expired token, a missing permission or a rate limit all land here.
     // None of them is a reason to show an empty screen, which is the single

@@ -1,10 +1,6 @@
 import { prisma } from "@/lib/db/client";
-import {
-  getFollowerCountSeries,
-  getUserInfo,
-  type FollowerCountPoint,
-  type InstagramContext,
-} from "@/lib/instagram/provider";
+import type { FollowerDelta } from "@/lib/channels/content";
+import type { OpenChannel } from "@/lib/channels/registry";
 
 export interface FollowerHistoryPoint {
   /** ISO date (YYYY-MM-DD). */
@@ -60,7 +56,7 @@ export async function recordFollowerSnapshot(
  * consistent history than a long, wrong one.
  */
 export function reconstructFollowerTotals(
-  series: FollowerCountPoint[],
+  series: FollowerDelta[],
   currentFollowers: number
 ): Array<{ date: string; followers: number }> {
   const ascending = [...series].sort((a, b) => a.date.localeCompare(b.date));
@@ -90,21 +86,16 @@ export function reconstructFollowerTotals(
  */
 export async function backfillFollowerHistory({
   instagramAccountId,
-  accessToken,
-  instagramId,
+  channel,
   currentFollowers,
 }: {
   instagramAccountId: string;
-  accessToken: InstagramContext;
-  instagramId: string;
+  channel: OpenChannel;
   currentFollowers: number;
 }): Promise<number> {
   let points: { date: string; followers: number }[];
   try {
-    const series = await getFollowerCountSeries({
-      context: accessToken,
-      igUserId: instagramId,
-    });
+    const series = await channel.adapter.content.followerHistory(channel.context);
     if (!series?.length) return 0;
     points = reconstructFollowerTotals(series, currentFollowers);
   } catch {
@@ -179,12 +170,12 @@ export async function getFollowerHistory(
  * without waiting for the next cron run.
  */
 export async function ensureFollowerHistory(
-  account: { id: string; instagramId: string },
-  accessToken: InstagramContext
+  account: { id: string },
+  channel: OpenChannel
 ): Promise<number | null> {
-  const info = await getUserInfo({ context: accessToken });
-  const followers = info.followers_count;
-  if (typeof followers !== "number") return null;
+  const profile = await channel.adapter.content.profile(channel.context);
+  const followers = profile.followersCount;
+  if (followers === null) return null;
 
   await recordFollowerSnapshot(account.id, followers);
 
@@ -194,8 +185,7 @@ export async function ensureFollowerHistory(
   if (count <= 1) {
     await backfillFollowerHistory({
       instagramAccountId: account.id,
-      accessToken: accessToken,
-      instagramId: account.instagramId,
+      channel,
       currentFollowers: followers,
     });
   }

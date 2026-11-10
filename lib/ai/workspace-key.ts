@@ -12,7 +12,7 @@
  */
 
 import { prisma } from "@/lib/db/client";
-import { decryptToken, encryptToken } from "@/lib/meta/oauth";
+import { decryptToken, encryptToken } from "@/lib/security/token-crypto";
 import {
   type AiProviderId,
   getProviderSpec,

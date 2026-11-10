@@ -126,6 +126,7 @@ export interface ChannelMessage {
   id: string;
   text: string | null;
   fromId: string | null;
+  fromUsername: string | null;
   /** ISO 8601. */
   createdAt: string | null;
 }

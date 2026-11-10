@@ -56,7 +56,7 @@ const URL_BASE = "https://myreply.test/api/instagram/persistent-menu";
 const OWN_ACCOUNT = {
   id: "account_ours",
   workspaceId: "workspace_123",
-  instagramId: "17841400000000000",
+  instagramId: "17841400000000000", platform: "INSTAGRAM",
   username: "kaldr",
   accessToken: "token_plain",
 };

@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/client";
-import {
-  MetaApiError,
-  sendDirectMessage,
-  sendDirectMessageWithLinkButton,
-} from "@/lib/meta/client";
-import { decryptToken } from "@/lib/meta/oauth";
+import { openChannel, type OpenChannel } from "@/lib/channels/registry";
 import {
   buildTrackedUrl,
   renderMessageWithTracking,
@@ -91,6 +86,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           instagramId: true,
           username: true,
           accessToken: true,
+          platform: true,
         },
       },
       trackedLinks: {
@@ -136,9 +132,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     });
   }
 
-  let accessToken: string;
+  let channel: OpenChannel;
   try {
-    accessToken = decryptToken(account.accessToken);
+    channel = await openChannel(account);
   } catch (error) {
     console.error("[Onboarding] Could not decrypt Instagram token:", error);
     return NextResponse.json(
@@ -175,20 +171,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           link.label ||
           "Open link",
       }));
-      await sendDirectMessageWithLinkButton(
-        accessToken,
-        account.instagramId,
-        contact.externalId,
-        bodyText,
-        buttons
-      );
+      await channel.adapter.messaging.send(channel.context, {
+        to: { kind: "user", userId: contact.externalId },
+        content: {
+          kind: "buttons",
+          text: bodyText,
+          buttons: buttons.map((button) => ({ type: "url" as const, ...button })),
+        },
+      });
     } else {
-      await sendDirectMessage(
-        accessToken,
-        account.instagramId,
-        contact.externalId,
-        bodyText
-      );
+      await channel.adapter.messaging.send(channel.context, {
+        to: { kind: "user", userId: contact.externalId },
+        content: { kind: "text", text: bodyText },
+      });
     }
   } catch (error) {
     const detail = error instanceof Error ? error.message : "";
@@ -208,7 +203,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     console.error("[Onboarding] Test send failed:", {
       automationId: automation.id,
-      code: error instanceof MetaApiError ? error.code : undefined,
+      code:
+        error instanceof Error && "code" in error
+          ? (error as { code: unknown }).code
+          : undefined,
     });
 
     return NextResponse.json(

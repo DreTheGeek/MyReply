@@ -10,6 +10,7 @@ vi.mock("@/lib/meta/client", async (importOriginal) => {
 });
 
 import type { InstagramMedia } from "../lib/meta/client";
+import { instagramAdapter } from "../lib/channels/instagram/adapter";
 import { GOAL_CARDS, MAX_FOLLOW_UP_DELAY_MINUTES } from "../lib/suggestions";
 import { captionUrl, inferGoal } from "../lib/onboarding/goal-inference";
 import {
@@ -20,6 +21,13 @@ import {
 } from "../lib/onboarding/suggest";
 
 const ACCOUNT = { id: "acct_1", username: "lasean" };
+
+// The account opened through the Instagram adapter. The Graph client below it
+// is mocked, so the adapter's own media mapping runs in every test here.
+const TEST_CHANNEL = {
+  adapter: instagramAdapter,
+  context: { platform: "INSTAGRAM" as const, accountExternalId: "ig_1", accessToken: "token" },
+};
 
 function media(
   overrides: Partial<InstagramMedia> & { id: string }
@@ -34,7 +42,7 @@ function media(
 
 function suggest(posts: InstagramMedia[]) {
   mockGetUserMedia.mockResolvedValue(posts);
-  return suggestOnboardingDrafts({ accessToken: "token", account: ACCOUNT });
+  return suggestOnboardingDrafts({ channel: TEST_CHANNEL, account: ACCOUNT });
 }
 
 /** A grid whose captions each point somewhere different. */
@@ -106,7 +114,7 @@ describe("the suggestion engine", () => {
     mockGetUserMedia.mockRejectedValue(new Error("token expired"));
 
     const result = await suggestOnboardingDrafts({
-      accessToken: "token",
+      channel: TEST_CHANNEL,
       account: ACCOUNT,
     });
 
@@ -295,12 +303,12 @@ describe("the suggestion engine", () => {
     mockGetUserMedia.mockResolvedValue(RICH_GRID);
 
     const friendly = await suggestOnboardingDrafts({
-      accessToken: "token",
+      channel: TEST_CHANNEL,
       account: ACCOUNT,
       tone: "friendly",
     });
     const professional = await suggestOnboardingDrafts({
-      accessToken: "token",
+      channel: TEST_CHANNEL,
       account: ACCOUNT,
       tone: "professional",
     });

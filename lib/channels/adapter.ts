@@ -160,6 +160,14 @@ export interface ChannelErrorRules extends SendErrorRules {
   isRichContentRejection(error: unknown): boolean;
   /** An error message an older worker logged for an uncertain outcome. */
   isLegacyUnconfirmed(errorMessage: string | null | undefined): boolean;
+  /**
+   * The platform's own explanation of a refusal, safe to show the person who
+   * tried (for example that the messaging window has closed), or null when
+   * the error is anything else. Never an internal error or a stack.
+   */
+  userMessage(error: unknown): string | null;
+  /** The account never granted the permission a read needs. Reconnecting fixes it. */
+  isPermissionDenied(error: unknown): boolean;
 }
 
 export interface ChannelAdapter {

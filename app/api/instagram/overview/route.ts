@@ -6,13 +6,8 @@ import {
 } from "@/lib/analytics/comment-heatmap";
 import { prisma } from "@/lib/db/client";
 import { getWorkspaceInstagramAccount } from "@/lib/instagram-accounts";
-import {
-  getAllUserMedia,
-  getMediaInsights,
-  PermissionError,
-  type InstagramMedia,
-} from "@/lib/instagram/provider";
-import { createInstagramContext } from "@/lib/instagram/provider";
+import type { ChannelMedia } from "@/lib/channels/content";
+import { openChannel } from "@/lib/channels/registry";
 import {
   ensureFollowerHistory,
   getFollowerHistory,
@@ -105,8 +100,8 @@ export interface OverviewResponse {
   posts: OverviewPost[];
 }
 
-function isVideoLike(media: InstagramMedia): boolean {
-  return media.media_product_type === "REELS" || media.media_type === "VIDEO";
+function isVideoLike(media: ChannelMedia): boolean {
+  return media.isReel || media.mediaType === "VIDEO";
 }
 
 export async function GET(request: NextRequest) {
@@ -135,7 +130,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const accessToken = await createInstagramContext(account);
+    const channel = await openChannel(account);
+    const { content, errors } = channel.adapter;
 
     // `count` is either "all" or a positive integer (last N posts).
     const countParam = request.nextUrl.searchParams.get("count");
@@ -151,7 +147,7 @@ export async function GET(request: NextRequest) {
       ? MAX_POSTS
       : Math.min(requestedCount as number, MAX_POSTS);
 
-    const media = await getAllUserMedia({ context: accessToken, max: target });
+    const media = await content.allMedia(channel.context, { max: target });
     const truncated = media.length >= MAX_POSTS;
 
     // Likes and comments come free with basic media fields. Views / reach /
@@ -169,15 +165,14 @@ export async function GET(request: NextRequest) {
           ? ["views", "reach", "saved", "shares", "total_interactions"]
           : ["reach", "saved", "shares", "total_interactions"];
         try {
-          const data = await getMediaInsights({
-            context: accessToken,
+          const data = await content.mediaInsights(channel.context, {
             mediaId: m.id,
-            metrics: metrics,
+            metrics,
           });
           insightsAvailable = true;
           return data;
         } catch (err) {
-          if (err instanceof PermissionError) permissionDenied = true;
+          if (errors.isPermissionDenied(err)) permissionDenied = true;
           return null;
         }
       }
@@ -185,14 +180,15 @@ export async function GET(request: NextRequest) {
 
     const posts: OverviewPost[] = media.map((m, i) => {
       const ins = insights[i];
-      const likes = m.like_count ?? 0;
-      const comments = m.comments_count ?? 0;
+      const likes = m.likeCount ?? 0;
+      const comments = m.commentsCount ?? 0;
       return {
         id: m.id,
         caption: m.caption?.trim().slice(0, 120) ?? null,
-        permalink: m.permalink ?? null,
-        thumbnailUrl: m.thumbnail_url ?? m.media_url ?? null,
-        mediaType: m.media_product_type ?? m.media_type,
+        permalink: m.permalink,
+        thumbnailUrl: m.thumbnailUrl ?? m.mediaUrl,
+        // The label the overview shows, in the words it always used.
+        mediaType: m.isReel ? "REELS" : "FEED",
         timestamp: m.timestamp,
         views: ins?.views ?? null,
         reach: ins?.reach ?? null,
@@ -240,10 +236,7 @@ export async function GET(request: NextRequest) {
     let followers: number | null = null;
     let followerHistory: FollowerHistoryPoint[] = [];
     try {
-      followers = await ensureFollowerHistory(
-        { id: account.id, instagramId: account.instagramId },
-        accessToken
-      );
+      followers = await ensureFollowerHistory({ id: account.id }, channel);
       followerHistory = await getFollowerHistory(account.id);
     } catch (err) {
       console.warn(

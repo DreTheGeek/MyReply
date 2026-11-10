@@ -68,7 +68,7 @@ const OTHER_WORKSPACE = "workspace_other";
 const OWN_ACCOUNT = {
   id: "acct_own",
   workspaceId: OWN_WORKSPACE,
-  instagramId: "ig_own",
+  instagramId: "ig_own", platform: "INSTAGRAM",
   username: "lasean",
   accessToken: "token_own",
 };
@@ -77,7 +77,7 @@ const OWN_ACCOUNT = {
 const FOREIGN_ACCOUNT = {
   id: "acct_foreign",
   workspaceId: OTHER_WORKSPACE,
-  instagramId: "ig_foreign",
+  instagramId: "ig_foreign", platform: "INSTAGRAM",
   username: "someoneelse",
   accessToken: "token_foreign",
 };
@@ -397,6 +397,7 @@ describe("POST /api/onboarding/test", () => {
       instagramId: OWN_ACCOUNT.instagramId,
       username: OWN_ACCOUNT.username,
       accessToken: OWN_ACCOUNT.accessToken,
+      platform: "INSTAGRAM",
     },
     trackedLinks: [],
   };
