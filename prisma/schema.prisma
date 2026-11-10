@@ -121,10 +121,20 @@ model VerificationToken {
 model Workspace {
   id        String   @id @default(cuid())
   name      String
-  ownerId   String
-  owner     User     @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  /// Null for a workspace a partner app created for one of its own users:
+  /// nobody signs in to it here, the partner acts on it with its key.
+  ownerId   String?
+  owner     User?    @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  /// The partner app that created this workspace, which alone may act on it
+  /// with a partner key. Restrict, so removing a partner can never take its
+  /// customers' workspaces with it by accident.
+  partnerId  String?
+  partner    Partner? @relation(fields: [partnerId], references: [id], onDelete: Restrict)
+  /// The partner's own id for the user this workspace belongs to.
+  externalId String?
 
   /// FREE gets everything with no marginal cost. PRO adds managed AI and
   /// advanced flows. BYOK AI is free on both: the key is the customer's.
@@ -180,7 +190,67 @@ model Workspace {
   oauthAuthorizationCodes OAuthAuthorizationCode[]
   oauthTokens             OAuthToken[]
 
+  @@unique([partnerId, externalId])
   @@index([ownerId])
+  @@index([partnerId, createdAt])
+}
+
+/// An app that embeds the engine for its own users. Lash Tech is the first.
+///
+/// It creates one workspace per user of its own and acts on them with a
+/// partner key. It never sees a workspace it did not create. The branding is
+/// what the hosted connect and inbox pages show in place of this product's
+/// name, so an end user only ever sees the partner.
+model Partner {
+  id            String        @id @default(cuid())
+  /// Internal label, never shown to an end user.
+  name          String
+  brandName     String
+  logoUrl       String?
+  primaryColor  String        @default("#111827")
+  accentColor   String        @default("#2563EB")
+  /// Whether hosted pages say who runs them underneath. Off unless the
+  /// partner asks for it.
+  showPoweredBy Boolean       @default(false)
+  /// The sender for email sent on the partner's behalf. Its domain must be
+  /// verified with the mail provider first.
+  emailFromName    String?
+  emailFromAddress String?
+  /// A hostname of the partner's that serves the hosted pages, such as
+  /// connect.lashtech.app. Null serves them from this deployment's own domain.
+  customDomain  String?       @unique
+  /// Origins that may frame the hosted pages, such as https://lashtech.app.
+  frameOrigins  String[]      @default([])
+  /// Origins a connect link may send the person back to.
+  returnOrigins String[]      @default([])
+  /// The plan the partner's workspaces are created on.
+  workspacePlan WorkspacePlan @default(FREE)
+  disabledAt    DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  keys       PartnerApiKey[]
+  workspaces Workspace[]
+}
+
+/// A partner's machine credential. Hashed at rest exactly like an API key.
+/// Acting on a workspace takes the workspace id in a header, and only one of
+/// the partner's own workspaces is ever accepted.
+model PartnerApiKey {
+  id         String    @id @default(cuid())
+  partnerId  String
+  partner    Partner   @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  name       String
+  prefix     String
+  hashedKey  String    @unique
+  /// From lib/api/scopes.ts. Empty means every scope.
+  scopes     String[]  @default([])
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([partnerId])
 }
 
 /// A person the account has talked to, identified once rather than repeated on

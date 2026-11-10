@@ -19,6 +19,8 @@ vi.mock("@/lib/api/rate-limit", async (importOriginal) => ({
 
 vi.mock("@/lib/auth", () => ({
   resolveRequestApiKey: mockApiKeyContext,
+  requestCarriesPartnerKey: async () => false,
+  resolveRequestPartner: async () => null,
 }));
 
 vi.mock("@/lib/workspace-access", () => ({

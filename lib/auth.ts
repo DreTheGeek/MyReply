@@ -12,6 +12,14 @@ import {
   touchApiKey,
 } from "@/lib/api-keys";
 import { currentCaller } from "@/lib/api/caller-context";
+import {
+  WORKSPACE_HEADER,
+  extractPartnerKey,
+  partnerWorkspaceContext,
+  resolvePartnerKey,
+  touchPartnerKey,
+  type PartnerCaller,
+} from "@/lib/partners/keys";
 import { ensureWorkspaceForUser, getPrimaryWorkspace } from "@/lib/workspace";
 import { isEmailAllowedToSignIn } from "@/lib/env";
 
@@ -100,7 +108,20 @@ export async function getCurrentUserId(): Promise<string | null> {
 export async function resolveRequestApiKey(): Promise<ApiKeyContext | null> {
   try {
     const headerList = await headers();
-    const plaintext = extractApiKey(headerList.get("authorization"));
+    const authorization = headerList.get("authorization");
+
+    // A partner key acts inside a workspace only when it names one of its own.
+    const partnerKey = extractPartnerKey(authorization);
+    if (partnerKey) {
+      const partner = await resolvePartnerKey(partnerKey);
+      if (!partner) return null;
+      const workspaceId = headerList.get(WORKSPACE_HEADER)?.trim() ?? "";
+      const context = workspaceId ? await partnerWorkspaceContext(partner, workspaceId) : null;
+      if (context) touchPartnerKey(partner.keyId);
+      return context;
+    }
+
+    const plaintext = extractApiKey(authorization);
     if (!plaintext) return null;
 
     const context = await resolveApiKey(plaintext);
@@ -116,6 +137,38 @@ export async function resolveRequestApiKey(): Promise<ApiKeyContext | null> {
       );
     }
     return null;
+  }
+}
+
+/**
+ * A partner key in the ambient request, for the partner's own endpoints
+ * (making and listing its workspaces). Only the partner door calls this.
+ */
+export async function resolveRequestPartner(): Promise<PartnerCaller | null> {
+  try {
+    const headerList = await headers();
+    const partnerKey = extractPartnerKey(headerList.get("authorization"));
+    if (!partnerKey) return null;
+    const partner = await resolvePartnerKey(partnerKey);
+    if (partner) touchPartnerKey(partner.keyId);
+    return partner;
+  } catch (error) {
+    console.error(
+      "[auth] Partner key lookup failed:",
+      error instanceof Error ? error.name : "unknown"
+    );
+    return null;
+  }
+}
+
+/** True when the request carries a partner key, whether or not it resolved. */
+export async function requestCarriesPartnerKey(): Promise<boolean> {
+  try {
+    const headerList = await headers();
+    return extractPartnerKey(headerList.get("authorization")) !== null;
+  } catch {
+    // Outside a request there is no header to carry anything.
+    return false;
   }
 }
 

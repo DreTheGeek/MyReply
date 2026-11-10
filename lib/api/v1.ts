@@ -3,7 +3,12 @@ import type { ApiKeyContext } from "@/lib/api-keys";
 import { runAsCaller } from "@/lib/api/caller-context";
 import { consumeCredentialRequest, rateLimitRefusal } from "@/lib/api/rate-limit";
 import { hasScope, type ApiScope } from "@/lib/api/scopes";
-import { resolveRequestApiKey } from "@/lib/auth";
+import {
+  requestCarriesPartnerKey,
+  resolveRequestApiKey,
+  resolveRequestPartner,
+} from "@/lib/auth";
+import type { PartnerCaller } from "@/lib/partners/keys";
 import { getCurrentWorkspaceContext } from "@/lib/workspace-access";
 
 /**
@@ -47,6 +52,17 @@ export async function requireApiKey(scope?: ApiScope): Promise<V1Caller | NextRe
   const context = await resolveRequestApiKey();
 
   if (!context) {
+    // A valid partner key that named no workspace, or one that is not its
+    // own. Unknown and someone else's read the same, so ids cannot be probed.
+    if (await requestCarriesPartnerKey()) {
+      const partner = await resolveRequestPartner();
+      if (partner) {
+        return v1Error(
+          "Name one of your workspaces in the X-Workspace-Id header. That workspace was not found for this key.",
+          404
+        );
+      }
+    }
     return v1Error(
       "This endpoint requires an API key. Send it as: Authorization: Bearer mr_live_...",
       401
@@ -109,6 +125,53 @@ export function v1Route<P = Record<string, never>>(
     try {
       const params = context?.params ? await context.params : ({} as P);
       return await runAsCaller(caller, () => handler(request, caller, params));
+    } catch (error) {
+      console.error(
+        `[v1] ${request.method} ${request.nextUrl.pathname} failed:`,
+        error instanceof Error ? `${error.name}: ${error.message}` : "unknown"
+      );
+      return v1Error("Something went wrong on our side. Try again shortly.", 500);
+    }
+  };
+}
+
+export type PartnerHandler<P> = (
+  request: NextRequest,
+  partner: PartnerCaller,
+  params: P
+) => Promise<Response>;
+
+/**
+ * A partner's own endpoint: making, listing and removing its workspaces. Only
+ * a partner key gets in; a workspace key is refused, because a workspace has
+ * no business creating other workspaces.
+ */
+export function partnerRoute<P = Record<string, never>>(
+  scope: ApiScope,
+  handler: PartnerHandler<P>
+): (request: NextRequest, context: RouteContext<P>) => Promise<Response> {
+  return async (request, context) => {
+    const partner = await resolveRequestPartner();
+    if (!partner) {
+      return v1Error(
+        "This endpoint requires a partner key. Send it as: Authorization: Bearer mr_partner_...",
+        401
+      );
+    }
+
+    const decision = await consumeCredentialRequest(partner.credentialId);
+    if (decision.status !== "allowed") {
+      const refusal = rateLimitRefusal(decision);
+      return v1Error(refusal.message, refusal.status, refusal.headers);
+    }
+
+    if (!hasScope(partner.scopes, scope)) {
+      return v1Error(`This key does not have the ${scope} scope.`, 403);
+    }
+
+    try {
+      const params = context?.params ? await context.params : ({} as P);
+      return await handler(request, partner, params);
     } catch (error) {
       console.error(
         `[v1] ${request.method} ${request.nextUrl.pathname} failed:`,

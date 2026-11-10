@@ -12,9 +12,22 @@ import { requireEnv } from "@/lib/env";
 
 const STATE_MAX_AGE_MS = 10 * 60 * 1000;
 
+/**
+ * Present when the connection was started from a partner's hosted connect
+ * link rather than by someone signed in here. The partner vouched for the
+ * workspace when it minted the link, so the callback checks the workspace is
+ * still the partner's instead of asking for a session, and sends the person
+ * back to the partner's app.
+ */
+export interface HostedConnect {
+  partnerId: string;
+  returnUrl: string;
+}
+
 interface OAuthStatePayload {
   workspaceId: string;
   ts: number;
+  hosted?: HostedConnect;
 }
 
 function base64UrlEncode(value: string): string {
@@ -31,9 +44,13 @@ function signState(payload: string): string {
     .digest("base64url");
 }
 
-export function createOAuthState(workspaceId: string): string {
+export function createOAuthState(workspaceId: string, hosted?: HostedConnect): string {
   const payload = base64UrlEncode(
-    JSON.stringify({ workspaceId, ts: Date.now() } satisfies OAuthStatePayload)
+    JSON.stringify({
+      workspaceId,
+      ts: Date.now(),
+      ...(hosted ? { hosted } : {}),
+    } satisfies OAuthStatePayload)
   );
   return `${payload}.${signState(payload)}`;
 }
@@ -74,7 +91,30 @@ export function verifyOAuthState(state: string | null): OAuthStatePayload | null
       return null;
     }
 
-    return parsed;
+    // Signed by us, but checked for shape anyway: a malformed hosted block is
+    // refused outright rather than half trusted.
+    if (parsed.hosted !== undefined) {
+      const hosted: unknown = parsed.hosted;
+      if (
+        typeof hosted !== "object" ||
+        hosted === null ||
+        typeof (hosted as HostedConnect).partnerId !== "string" ||
+        typeof (hosted as HostedConnect).returnUrl !== "string" ||
+        !(hosted as HostedConnect).returnUrl.startsWith("https://")
+      ) {
+        return null;
+      }
+      return {
+        workspaceId: parsed.workspaceId,
+        ts: parsed.ts,
+        hosted: {
+          partnerId: (hosted as HostedConnect).partnerId,
+          returnUrl: (hosted as HostedConnect).returnUrl,
+        },
+      };
+    }
+
+    return { workspaceId: parsed.workspaceId, ts: parsed.ts };
   } catch {
     return null;
   }

@@ -11,7 +11,11 @@ const { mockResolve, mockConsume } = vi.hoisted(() => ({
   mockConsume: vi.fn(),
 }));
 
-vi.mock("@/lib/auth", () => ({ resolveRequestApiKey: mockResolve }));
+vi.mock("@/lib/auth", () => ({
+  resolveRequestApiKey: mockResolve,
+  requestCarriesPartnerKey: async () => false,
+  resolveRequestPartner: async () => null,
+}));
 vi.mock("@/lib/api/rate-limit", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/api/rate-limit")>()),
   consumeCredentialRequest: mockConsume,

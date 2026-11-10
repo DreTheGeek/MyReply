@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { mockPrisma, mockAuth, mockCompleteConnection } = vi.hoisted(() => ({
   mockPrisma: {
     workspaceMember: { findFirst: vi.fn() },
+    workspace: { findFirst: vi.fn() },
     operationalEvent: { create: vi.fn() },
   },
   mockAuth: vi.fn(),
@@ -72,5 +73,53 @@ describe("GET /api/instagram/callback, when connecting fails", () => {
         payload: { reason: SECRET_DETAIL },
       }),
     });
+  });
+});
+
+describe("GET /api/instagram/callback, from a partner's hosted connect link", () => {
+  const hosted = { partnerId: "partner_lash", returnUrl: "https://lashtech.app/done" };
+
+  it("needs no session, and lands back on the partner's app without the reason", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockPrisma.workspace.findFirst.mockResolvedValue({ id: "workspace_1" });
+    const state = createOAuthState("workspace_1", hosted);
+    const response = await GET(
+      new NextRequest(
+        `https://myreply.test/api/instagram/callback?code=abc&state=${encodeURIComponent(state)}`
+      )
+    );
+
+    const location = response.headers.get("location") ?? "";
+    expect(location).toBe(
+      "https://lashtech.app/done?connect_status=failed&platform=instagram&workspace_id=workspace_1"
+    );
+    expect(decodeURIComponent(location)).not.toContain("client_secret");
+    expect(mockPrisma.workspace.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: "workspace_1", partnerId: "partner_lash" }),
+      })
+    );
+  });
+
+  it("refuses a workspace that is no longer the partner's, before touching the code", async () => {
+    mockPrisma.workspace.findFirst.mockResolvedValue(null);
+    const state = createOAuthState("workspace_1", hosted);
+    const response = await GET(
+      new NextRequest(
+        `https://myreply.test/api/instagram/callback?code=abc&state=${encodeURIComponent(state)}`
+      )
+    );
+    expect(response.headers.get("location")).toContain("connect_status=forbidden");
+    expect(mockCompleteConnection).not.toHaveBeenCalled();
+  });
+
+  it("sends a person who said no back to the partner", async () => {
+    const state = createOAuthState("workspace_1", hosted);
+    const response = await GET(
+      new NextRequest(
+        `https://myreply.test/api/instagram/callback?error=access_denied&state=${encodeURIComponent(state)}`
+      )
+    );
+    expect(response.headers.get("location")).toContain("https://lashtech.app/done?connect_status=denied");
   });
 });

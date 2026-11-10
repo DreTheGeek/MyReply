@@ -43,6 +43,9 @@ export const AUDIT_ACTIONS = [
   // account removed the app, or asked for their data to be deleted.
   "channel.deauthorized",
   "channel.data_deleted",
+  // A partner app removed one of the workspaces it created. The row outlives
+  // the workspace, with its link cleared and the ids kept in its detail.
+  "workspace.deleted",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -60,6 +63,7 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   "data.exported": "Data exported",
   "channel.deauthorized": "App removed on the platform, account paused",
   "channel.data_deleted": "Data deleted at the platform's request",
+  "workspace.deleted": "Workspace deleted by the partner app",
 };
 
 export interface AuditEntry {
