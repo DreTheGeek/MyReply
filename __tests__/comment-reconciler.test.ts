@@ -20,12 +20,13 @@ const { mockPrisma, queueAdd, readComments } = vi.hoisted(() => ({
 vi.mock("@/lib/queue/client", () => ({
   getDMQueue: () => ({ add: queueAdd }),
 }));
-vi.mock("@/lib/instagram/provider", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/instagram/provider")>()),
-  createInstagramContext: async () => ({
-    provider: "META",
-    accessToken: "local-test",
-  }),
+// Mocked below the channel adapter, at the Graph client, so the sweep runs
+// through the adapter's own mapping of Instagram's comment shape.
+vi.mock("@/lib/meta/oauth", () => ({
+  decryptToken: () => "local-test",
+}));
+vi.mock("@/lib/meta/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/meta/client")>()),
   getRecentMediaComments: readComments,
 }));
 
@@ -93,7 +94,7 @@ describe("comment polling does not recreate unsafe sends", () => {
         instagramAccount: {
           id: "connection",
           instagramId: "owner",
-          provider: "META",
+          platform: "INSTAGRAM",
           accessToken: "test",
         },
       },

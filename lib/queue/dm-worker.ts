@@ -1,9 +1,4 @@
-import {
-  classifySendError,
-  hasLegacyUnconfirmedDelivery,
-  isConfirmedSendRejection,
-  isDeliveryUnconfirmed,
-} from "@/lib/instagram/delivery-errors";
+import { classifySendError, isDeliveryUnconfirmed } from "@/lib/channels/errors";
 import { claimCommentDelivery, MAX_COMMENT_SEND_ATTEMPTS } from "./comment-delivery";
 import { createHash } from "node:crypto";
 import { UnrecoverableError, Worker, type Job } from "bullmq";
@@ -22,28 +17,14 @@ import {
 import { prisma } from "@/lib/db/client";
 import { canMessageContact } from "@/lib/messaging/opt-out";
 import { checkQuietHours } from "@/lib/messaging/quiet-hours";
+import type { ChannelErrorRules } from "@/lib/channels/adapter";
+import { inferAttachmentKind, type ButtonSpec } from "@/lib/channels/content";
+import { resolveRecipientName } from "@/lib/channels/recipient-name";
 import {
-  MetaApiError,
-  RateLimitError,
-  TokenExpiredError,
-  getUserFollowStatus,
-  resolveRecipientName,
-  sendCommentReply,
-  sendDirectMessage,
-  sendDirectMessageWithButton,
-  sendDirectMessageWithLinkButton,
-  sendDirectMessageWithQuickReplies,
-  sendPrivateReply,
-  sendPrivateReplyWithButton,
-  sendPrivateReplyWithLinkButton,
-  sendAttachment,
-  inferAttachmentType,
-} from "@/lib/instagram/provider";
-import {
-  createInstagramContext,
-  hasInstagramCredentials,
-  type InstagramContext,
-} from "@/lib/instagram/provider";
+  getChannelAdapter,
+  openChannel,
+  type OpenChannel,
+} from "@/lib/channels/registry";
 import {
   isRoutablePostbackPayload,
   parseQuickReplies,
@@ -113,38 +94,23 @@ const FOLLOW_RECHECK_TOTAL_MS = FOLLOW_RECHECK_DELAYS_MS.reduce(
  * again, which is far better than spamming someone who already received it.
  */
 
+/**
+ * The text stored on a log row. A platform error that carries a numeric code
+ * is written as "<Name> <code>: <message>", the shape the legacy-unconfirmed
+ * check reads back, so older rows and newer ones are judged the same way.
+ */
 function formatError(error: unknown): string {
-  if (error instanceof MetaApiError) {
-    return `${error.name} ${error.code}: ${error.message}`;
+  if (
+    error instanceof Error &&
+    "code" in error &&
+    typeof (error as { code: unknown }).code === "number"
+  ) {
+    return `${error.name} ${(error as { code: number }).code}: ${error.message}`;
   }
   if (error instanceof Error) {
     return error.message;
   }
   return "Unknown error";
-}
-
-// Meta rejections that a plain-text retry cannot fix: the send was refused for
-// the conversation, not for the button template. Retrying as text just burns
-// the attempt and, worse, overwrites the real error with a misleading one
-// ("invalid for a private reply", because the first attempt already used up the
-// comment's single allowed private reply).
-const NON_TEMPLATE_REJECTIONS = [
-  /outside of allowed window/i,
-  /invalid for a private reply/i,
-  /requested user cannot be found/i,
-];
-
-function isTemplateRejection(error: unknown): boolean {
-  if (
-    error instanceof TokenExpiredError ||
-    error instanceof RateLimitError
-  ) {
-    return false;
-  }
-  // Falling back is another send: allow it only for a proven template error.
-  return error instanceof MetaApiError && error.code === 100 &&
-    /template|button/i.test(error.message) &&
-    !NON_TEMPLATE_REJECTIONS.some((pattern) => pattern.test(error.message));
 }
 
 type WorkerTrackedLink = {
@@ -168,6 +134,11 @@ function buildLinkButtons(
     title:
       (index === 0 ? primaryLabel : link.label) || link.label || "Open link",
   }));
+}
+
+/** Link buttons in the adapter's neutral shape. */
+function linkButtonSpecs(buttons: { title: string; url: string }[]): ButtonSpec[] {
+  return buttons.map((button) => ({ type: "url", title: button.title, url: button.url }));
 }
 
 /**
@@ -218,7 +189,7 @@ type RevealAutomation = {
  * would send the message twice.
  */
 async function sendAttachmentIfAny(
-  accessToken: InstagramContext,
+  channel: OpenChannel,
   automation: { attachmentUrl?: string | null; instagramAccount: { instagramId: string } },
   userId: string,
   context: string
@@ -227,12 +198,13 @@ async function sendAttachmentIfAny(
   if (!url) return;
 
   try {
-    await sendAttachment({
-      context: accessToken,
-      instagramAccountId: automation.instagramAccount.instagramId,
-      userId,
-      attachmentUrl: url,
-      type: inferAttachmentType(url),
+    await channel.adapter.messaging.send(channel.context, {
+      to: { kind: "user", userId },
+      content: {
+        kind: "attachment",
+        url,
+        mediaType: inferAttachmentKind(url),
+      },
     });
   } catch (error) {
     console.warn(
@@ -248,13 +220,13 @@ async function sendAttachmentIfAny(
  * have an open conversation with the user, so neither uses a private reply.
  */
 async function sendRevealDirectMessage({
-  accessToken,
+  channel,
   automation,
   userId,
   commenterName,
   context,
 }: {
-  accessToken: InstagramContext;
+  channel: OpenChannel;
   automation: RevealAutomation;
   userId: string;
   commenterName: string | null;
@@ -276,22 +248,24 @@ async function sendRevealDirectMessage({
     });
 
     if (quickReplies.length > 0) {
-      await sendDirectMessageWithQuickReplies({
-        context: accessToken,
-        instagramAccountId: automation.instagramAccount.instagramId,
-        userId,
-        text,
-        quickReplies,
+      await channel.adapter.messaging.send(channel.context, {
+        to: { kind: "user", userId },
+        content: {
+          kind: "text",
+          text,
+          quickReplies,
+        },
       });
     } else {
-      await sendDirectMessage({
-        context: accessToken,
-        instagramAccountId: automation.instagramAccount.instagramId,
-        userId,
-        message: text,
+      await channel.adapter.messaging.send(channel.context, {
+        to: { kind: "user", userId },
+        content: {
+          kind: "text",
+          text,
+        },
       });
     }
-    await sendAttachmentIfAny(accessToken, automation, userId, context);
+    await sendAttachmentIfAny(channel, automation, userId, context);
     return;
   }
 
@@ -309,43 +283,45 @@ async function sendRevealDirectMessage({
   );
 
   try {
-    await sendDirectMessageWithLinkButton({
-      context: accessToken,
-      instagramAccountId: automation.instagramAccount.instagramId,
-      userId: userId,
-      text: bodyText,
-      buttons: buttons,
+    await channel.adapter.messaging.send(channel.context, {
+      to: { kind: "user", userId },
+      content: {
+        kind: "buttons",
+        text: bodyText,
+        buttons: linkButtonSpecs(buttons),
+      },
     });
   } catch (buttonError) {
     // A closed messaging window rejects the text retry too, so don't let it
     // overwrite the original error with a misleading one.
-    if (!isTemplateRejection(buttonError)) throw buttonError;
+    if (!channel.adapter.errors.isRichContentRejection(buttonError)) throw buttonError;
 
     console.log(
       `[DM Worker] Button template rejected in ${context}, falling back to inline link:`,
       formatError(buttonError)
     );
     try {
-      await sendDirectMessage({
-        context: accessToken,
-        instagramAccountId: automation.instagramAccount.instagramId,
-        userId: userId,
-        message: buildInlineLinkFallback(
-          automation.dmMessage,
-          commenterName,
-          automation.trackedLinks,
-          bodyText,
-          recipientToken
-        ),
+      await channel.adapter.messaging.send(channel.context, {
+        to: { kind: "user", userId },
+        content: {
+          kind: "text",
+          text: buildInlineLinkFallback(
+            automation.dmMessage,
+            commenterName,
+            automation.trackedLinks,
+            bodyText,
+            recipientToken
+          ),
+        },
       });
     } catch (fallbackError) {
-      throw classifySendError(fallbackError);
+      throw classifySendError(channel.adapter.errors, fallbackError);
     }
   }
 
   // Reached whether the button template worked or the inline fallback did, so
   // the file follows the message either way.
-  await sendAttachmentIfAny(accessToken, automation, userId, context);
+  await sendAttachmentIfAny(channel, automation, userId, context);
 }
 
 
@@ -431,7 +407,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
       },
     });
 
-    if (existingLog?.status === "FAILED" && hasLegacyUnconfirmedDelivery(existingLog.errorMessage)) {
+    if (existingLog?.status === "FAILED" && getChannelAdapter(automation.instagramAccount.platform).errors.isLegacyUnconfirmed(existingLog.errorMessage)) {
       await prisma.dmLog.update({
         where: { automationId_commentId: { automationId: automation.id, commentId } },
         data: { dmDeliveryUnconfirmed: true },
@@ -455,7 +431,9 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
       continue;
     }
 
-    if (!hasInstagramCredentials(automation.instagramAccount)) {
+    if (!getChannelAdapter(automation.instagramAccount.platform).hasCredentials(
+      automation.instagramAccount
+    )) {
       await prisma.dmLog.upsert({
         where: {
           automationId_commentId: {
@@ -483,9 +461,9 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
       continue;
     }
 
-    let accessToken: InstagramContext;
+    let channel: OpenChannel;
     try {
-      accessToken = await createInstagramContext(automation.instagramAccount);
+      channel = await openChannel(automation.instagramAccount);
     } catch {
       await prisma.dmLog.upsert({
         where: {
@@ -550,10 +528,9 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           commenterName,
           trackedLinks: automation.trackedLinks,
         });
-        await sendCommentReply({
-          context: accessToken,
-          commentId: commentId,
-          message: publicReply,
+        await channel.adapter.messaging.publicReply(channel.context, {
+          commentId,
+          text: publicReply,
           postId: mediaId,
         });
         await prisma.dmLog.update({
@@ -575,7 +552,13 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
                 commentId,
               },
             },
-            data: { publicReplyError: formatError(classifySendError(error)), publicReplyDeliveryUnconfirmed: !isConfirmedSendRejection(error) },
+            data: {
+              publicReplyError: formatError(
+                classifySendError(channel.adapter.errors, error)
+              ),
+              publicReplyDeliveryUnconfirmed:
+                !channel.adapter.errors.isConfirmedRejection(error),
+            },
           })
           .catch(() => {});
       }
@@ -777,10 +760,10 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
     // else gets the "follow me first" prompt (re-verified on tap).
     let sendFollowPrompt = false;
     if (automation.requireFollow && !useOpeningDm) {
-      const alreadyFollows = await getUserFollowStatus({
-        context: accessToken,
-        recipientId: commenterId,
-      });
+      const alreadyFollows = await channel.adapter.messaging.followStatus(
+        channel.context,
+        commenterId
+      );
       sendFollowPrompt = alreadyFollows !== true;
     }
 
@@ -805,16 +788,22 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           commenterName,
           trackedLinks: [],
         });
-        await sendPrivateReplyWithButton({
-          context: accessToken,
-          instagramAccountId: automation.instagramAccount.instagramId,
-          commentId: commentId,
-          text: openingText,
-          buttonTitle: automation.openingDmButtonLabel as string,
-          // The ":open" marker tells a tap here apart from the follow prompt's
-          // own "I'm following" button, which sends the same prefix.
-          payload: `${automation.requireFollow ? "followcheck" : "reveal"}:${automation.id}:open`,
-          postId: mediaId,
+        await channel.adapter.messaging.send(channel.context, {
+          to: { kind: "comment", commentId, postId: mediaId },
+          content: {
+            kind: "buttons",
+            text: openingText,
+            buttons: [
+              {
+                type: "postback",
+                title: automation.openingDmButtonLabel as string,
+                // The ":open" marker tells a tap here apart from the follow
+                // prompt's own "I'm following" button, which sends the same
+                // prefix.
+                payload: `${automation.requireFollow ? "followcheck" : "reveal"}:${automation.id}:open`,
+              },
+            ],
+          },
         });
       } else if (sendFollowPrompt) {
         const promptText = renderMessageWithoutLink({
@@ -823,14 +812,19 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
             DEFAULT_FOLLOW_PROMPT,
           commenterName,
         });
-        await sendPrivateReplyWithButton({
-          context: accessToken,
-          instagramAccountId: automation.instagramAccount.instagramId,
-          commentId: commentId,
-          text: promptText,
-          buttonTitle: automation.followPromptButtonLabel || "i'm following",
-          payload: `followcheck:${automation.id}`,
-          postId: mediaId,
+        await channel.adapter.messaging.send(channel.context, {
+          to: { kind: "comment", commentId, postId: mediaId },
+          content: {
+            kind: "buttons",
+            text: promptText,
+            buttons: [
+              {
+                type: "postback",
+                title: automation.followPromptButtonLabel || "i'm following",
+                payload: `followcheck:${automation.id}`,
+              },
+            ],
+          },
         });
       } else if (automation.trackedLinks.length > 0) {
         // Try button template first; if Meta rejects it, fall back to inline links.
@@ -846,19 +840,19 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
         );
 
         try {
-          await sendPrivateReplyWithLinkButton({
-            context: accessToken,
-            instagramAccountId: automation.instagramAccount.instagramId,
-            commentId: commentId,
-            text: bodyText,
-            buttons: buttons,
-            postId: mediaId,
+          await channel.adapter.messaging.send(channel.context, {
+            to: { kind: "comment", commentId, postId: mediaId },
+            content: {
+              kind: "buttons",
+              text: bodyText,
+              buttons: linkButtonSpecs(buttons),
+            },
           });
         } catch (buttonError) {
           // Only a template rejection is worth retrying as text. Anything else
           // (closed window, comment already replied to) fails the same way and
           // would replace the real error with a misleading one.
-          if (!isTemplateRejection(buttonError)) throw buttonError;
+          if (!channel.adapter.errors.isRichContentRejection(buttonError)) throw buttonError;
 
           console.log(
             "[DM Worker] Button template rejected, falling back to inline link:",
@@ -872,15 +866,15 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
             hashRecipientId(commenterId)
           );
           try {
-            await sendPrivateReply({
-              context: accessToken,
-              instagramAccountId: automation.instagramAccount.instagramId,
-              commentId: commentId,
-              message: fallbackMessage,
-              postId: mediaId,
+            await channel.adapter.messaging.send(channel.context, {
+              to: { kind: "comment", commentId, postId: mediaId },
+              content: {
+                kind: "text",
+                text: fallbackMessage,
+              },
             });
           } catch (fallbackError) {
-            throw classifySendError(fallbackError);
+            throw classifySendError(channel.adapter.errors, fallbackError);
           }
         }
       } else {
@@ -890,12 +884,12 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           trackedLinks: automation.trackedLinks,
           recipientToken: hashRecipientId(commenterId),
         });
-        await sendPrivateReply({
-          context: accessToken,
-          instagramAccountId: automation.instagramAccount.instagramId,
-          commentId: commentId,
-          message: dmMessage,
-          postId: mediaId,
+        await channel.adapter.messaging.send(channel.context, {
+          to: { kind: "comment", commentId, postId: mediaId },
+          content: {
+            kind: "text",
+            text: dmMessage,
+          },
         });
       }
 
@@ -915,9 +909,9 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
         },
       });
     } catch (error) {
-      const sendError = classifySendError(error);
+      const sendError = classifySendError(channel.adapter.errors, error);
       // Retain reservations if the provider may have delivered the message.
-      if (isConfirmedSendRejection(sendError)) {
+      if (channel.adapter.errors.isConfirmedRejection(sendError)) {
         if (rateLimit?.reserved) await releaseDMSlot(instagramAccountId);
         await releaseWorkspaceDMReservation(automation.workspaceId, usage.periodStart);
       }
@@ -937,9 +931,12 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
 
 async function sendPostbackOnce({
   operationId,
+  errors,
   send,
 }: {
   operationId: string;
+  /** The platform's rules for whether a failed send is a confirmed refusal. */
+  errors: ChannelErrorRules;
   send: () => Promise<unknown>;
 }): Promise<boolean> {
   try {
@@ -960,11 +957,11 @@ async function sendPostbackOnce({
   } catch (error) {
     // A durable claim survives queue eviction, concurrent redelivery, and a
     // process crash during delivery. Only confirmed rejections permit retry.
-    if (isConfirmedSendRejection(error)) {
+    if (errors.isConfirmedRejection(error)) {
       await prisma.postbackDelivery.delete({ where: { id: operationId } });
       throw error;
     }
-    throw classifySendError(error);
+    throw classifySendError(errors, error);
   }
 }
 
@@ -973,14 +970,12 @@ async function sendPostbackOnce({
 // the follow. Opt-in through FOLLOW_RECHECK_ACK_MESSAGE, and best-effort: it
 // never holds up the re-check, which is already queued when this runs.
 async function sendFollowRecheckAck({
-  context,
-  instagramAccountId,
+  channel,
   automationId,
   userId,
   operationId,
 }: {
-  context: InstagramContext;
-  instagramAccountId: string;
+  channel: OpenChannel;
   automationId: string;
   userId: string;
   operationId: string | null;
@@ -999,12 +994,19 @@ async function sendFollowRecheckAck({
     );
     if (first !== "OK") return;
     const send = () =>
-      sendDirectMessage({ context, instagramAccountId, userId, message });
+      channel.adapter.messaging.send(channel.context, {
+        to: { kind: "user", userId },
+        content: { kind: "text", text: message },
+      });
     // Its own id: the tap's id is claimed later by the link or prompt that
     // the re-check sends, and claiming it here would suppress that message.
     // Without an id the Redis NX above is the only dedupe.
     if (operationId) {
-      await sendPostbackOnce({ operationId: `${operationId}:ack`, send });
+      await sendPostbackOnce({
+        operationId: `${operationId}:ack`,
+        errors: channel.adapter.errors,
+        send,
+      });
     } else {
       await send();
     }
@@ -1078,7 +1080,9 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
   if (
     !automation ||
     automation.instagramAccount.instagramId !== instagramAccountId ||
-    !hasInstagramCredentials(automation.instagramAccount)
+    !getChannelAdapter(automation.instagramAccount.platform).hasCredentials(
+      automation.instagramAccount
+    )
   ) {
     return;
   }
@@ -1103,9 +1107,9 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
       return;
   }
 
-  let accessToken: InstagramContext;
+  let channel: OpenChannel;
   try {
-    accessToken = await createInstagramContext(automation.instagramAccount);
+    channel = await openChannel(automation.instagramAccount);
   } catch {
     // Returning silently here marked the job completed, so BullMQ never
     // retried and nothing was written anywhere: no DmLog, no OperationalEvent,
@@ -1123,7 +1127,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
 
   // Personalize {username}. The postback carries only the tapper's IGSID.
   const commenterName = await resolveRecipientName({
-    context: accessToken,
+    channel,
     workspaceId: automation.workspaceId,
     recipientId: userId,
   });
@@ -1144,10 +1148,10 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
   // unverifiable (null) falls through and delivers the link, fail-open so a
   // real follower is never trapped.
   if ((isFollowCheck || fallback) && automation.requireFollow) {
-    const follows = await getUserFollowStatus({
-      context: accessToken,
-      recipientId: userId,
-    });
+    const follows = await channel.adapter.messaging.followStatus(
+      channel.context,
+      userId
+    );
     // A read fallback needs a confirmed follow. Instagram only reports follow
     // status once the person has tapped a button (before that it answers
     // "User consent is required", i.e. null), so failing open here handed the
@@ -1192,8 +1196,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
           );
           if (rechecksDone === 0) {
             await sendFollowRecheckAck({
-              context: accessToken,
-              instagramAccountId: automation.instagramAccount.instagramId,
+              channel,
               automationId: automation.id,
               userId,
               operationId,
@@ -1233,15 +1236,21 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
       try {
         await sendPostbackOnce({
           operationId,
+          errors: channel.adapter.errors,
           send: () =>
-            sendDirectMessageWithButton({
-              context: accessToken,
-              instagramAccountId: automation.instagramAccount.instagramId,
-              userId: userId,
-              text: promptText,
-              buttonTitle:
-                automation.followPromptButtonLabel || "i'm following",
-              payload: `followcheck:${automation.id}`,
+            channel.adapter.messaging.send(channel.context, {
+              to: { kind: "user", userId },
+              content: {
+                kind: "buttons",
+                text: promptText,
+                buttons: [
+                  {
+                    type: "postback",
+                    title: automation.followPromptButtonLabel || "i'm following",
+                    payload: `followcheck:${automation.id}`,
+                  },
+                ],
+              },
             }),
         });
       } catch (error) {
@@ -1282,9 +1291,10 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
   try {
     const delivered = await sendPostbackOnce({
       operationId,
+      errors: channel.adapter.errors,
       send: () =>
         sendRevealDirectMessage({
-          accessToken: accessToken,
+          channel: channel,
           automation: automation,
           userId: userId,
           commenterName: commenterName,
@@ -1341,8 +1351,8 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
       update: { status: "SENT", dmSentAt: new Date(), errorMessage: null },
     });
   } catch (originalError) {
-    const error = classifySendError(originalError);
-    if (isConfirmedSendRejection(error)) await releaseWorkspaceDMReservation(
+    const error = classifySendError(channel.adapter.errors, originalError);
+    if (channel.adapter.errors.isConfirmedRejection(error)) await releaseWorkspaceDMReservation(
       automation.workspaceId,
       usage.periodStart,
     );
@@ -1409,7 +1419,9 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
     !automation.followUpEnabled ||
     !automation.followUpMessage?.trim() ||
     automation.instagramAccount.instagramId !== instagramAccountId ||
-    !hasInstagramCredentials(automation.instagramAccount)
+    !getChannelAdapter(automation.instagramAccount.platform).hasCredentials(
+      automation.instagramAccount
+    )
   ) {
     return;
   }
@@ -1447,9 +1459,9 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
     return;
   }
 
-  let accessToken: InstagramContext;
+  let channel: OpenChannel;
   try {
-    accessToken = await createInstagramContext(automation.instagramAccount);
+    channel = await openChannel(automation.instagramAccount);
   } catch {
     // Returning silently here marked the job completed, so BullMQ never
     // retried and nothing was written anywhere: no DmLog, no OperationalEvent,
@@ -1466,14 +1478,15 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
   }
 
   try {
-    await sendDirectMessage({
-      context: accessToken,
-      instagramAccountId: automation.instagramAccount.instagramId,
-      userId: userId,
-      message: renderMessageWithoutLink({
-        message: automation.followUpMessage,
-        commenterName: commenterName ?? null,
-      }),
+    await channel.adapter.messaging.send(channel.context, {
+      to: { kind: "user", userId },
+      content: {
+        kind: "text",
+        text: renderMessageWithoutLink({
+          message: automation.followUpMessage,
+          commenterName: commenterName ?? null,
+        }),
+      },
     });
   } catch (error) {
     console.log(
@@ -1624,7 +1637,9 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
       matchedKeyword: matchResult.matchedKeyword,
     };
 
-    if (!hasInstagramCredentials(automation.instagramAccount)) {
+    if (!getChannelAdapter(automation.instagramAccount.platform).hasCredentials(
+      automation.instagramAccount
+    )) {
       await prisma.dmLog.upsert({
         where: {
           automationId_commentId: {
@@ -1645,9 +1660,9 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
       continue;
     }
 
-    let accessToken: InstagramContext;
+    let channel: OpenChannel;
     try {
-      accessToken = await createInstagramContext(automation.instagramAccount);
+      channel = await openChannel(automation.instagramAccount);
     } catch {
       await prisma.dmLog.upsert({
         where: {
@@ -1672,7 +1687,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
     // Personalize {username}. The messages webhook carries only the sender's
     // IGSID, so the handle is recovered from an earlier send or read live.
     const commenterName = await resolveRecipientName({
-      context: accessToken,
+      channel,
       workspaceId: automation.workspaceId,
       recipientId: senderId,
     });
@@ -1686,10 +1701,10 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
     // anyone whose status the API happens not to resolve.
     let sendFollowPrompt = false;
     if (automation.requireFollow) {
-      const follows = await getUserFollowStatus({
-        context: accessToken,
-        recipientId: senderId,
-      });
+      const follows = await channel.adapter.messaging.followStatus(
+        channel.context,
+        senderId
+      );
       sendFollowPrompt = follows !== true;
     }
 
@@ -1723,17 +1738,23 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
             "Almost there! Follow me and tap the button below to grab your link 💛",
           commenterName,
         });
-        await sendDirectMessageWithButton({
-          context: accessToken,
-          instagramAccountId: automation.instagramAccount.instagramId,
-          userId: senderId,
-          text: promptText,
-          buttonTitle: automation.followPromptButtonLabel || "I'm following ✅",
-          payload: `followcheck:${automation.id}`,
+        await channel.adapter.messaging.send(channel.context, {
+          to: { kind: "user", userId: senderId },
+          content: {
+            kind: "buttons",
+            text: promptText,
+            buttons: [
+              {
+                type: "postback",
+                title: automation.followPromptButtonLabel || "I'm following ✅",
+                payload: `followcheck:${automation.id}`,
+              },
+            ],
+          },
         });
       } else {
         await sendRevealDirectMessage({
-          accessToken: accessToken,
+          channel: channel,
           automation: automation,
           userId: senderId,
           commenterName: commenterName,
@@ -1857,15 +1878,18 @@ async function tryAssistantAnswer(job: Job<ProcessMessageJob>): Promise<boolean>
         instagramId: true,
         accessToken: true,
         workspaceId: true,
+        platform: true,
         workspace: { select: { name: true } },
       },
     });
-    if (!account || !hasInstagramCredentials(account)) return false;
+    if (!account || !getChannelAdapter(account.platform).hasCredentials(account)) {
+      return false;
+    }
 
     const settings = await getAnsweringSettings(account.workspaceId);
     if (!settings.enabled) return false;
 
-    const accessToken = await createInstagramContext(account);
+    const channel = await openChannel(account);
 
     const contact = await upsertContact({
       workspaceId: account.workspaceId,
@@ -1893,11 +1917,12 @@ async function tryAssistantAnswer(job: Job<ProcessMessageJob>): Promise<boolean>
       // that sat in a retry backoff overnight must not answer on a stale clock.
       customerMessageAt: new Date(job.timestamp ?? Date.now()),
       send: async (text: string): Promise<void> => {
-        await sendDirectMessage({
-          context: accessToken,
-          instagramAccountId: account.instagramId,
-          userId: senderId,
-          message: text,
+        await channel.adapter.messaging.send(channel.context, {
+          to: { kind: "user", userId: senderId },
+          content: {
+            kind: "text",
+            text,
+          },
         });
         delivered = true;
       },

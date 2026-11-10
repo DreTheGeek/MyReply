@@ -26,19 +26,11 @@
  */
 
 import { MAX_COMMENT_SEND_ATTEMPTS } from "@/lib/queue/comment-delivery";
-import { hasLegacyUnconfirmedDelivery } from "@/lib/instagram/delivery-errors";
 import { prisma } from "@/lib/db/client";
 import { getDMQueue, getRedisConnection } from "@/lib/queue/client";
-import {
-  getRecentMediaComments,
-  getUserMedia,
-  MetaApiError,
-  type InstagramComment,
-} from "@/lib/instagram/provider";
-import {
-  createInstagramContext,
-  type InstagramContext,
-} from "@/lib/instagram/provider";
+import type { ChannelComment } from "@/lib/channels/content";
+import type { ChannelPlatform } from "@/lib/channels/platforms";
+import { openChannel, type OpenChannel } from "@/lib/channels/registry";
 import { matchKeywords } from "@/lib/utils/keyword-matcher";
 
 // Only consider comments from the last few days, older ones are outside
@@ -75,8 +67,15 @@ interface SweepStat {
 }
 
 function errMessage(error: unknown): string {
-  if (error instanceof MetaApiError)
-    return `Meta ${error.code}: ${error.message}`;
+  // A platform error with a numeric code shows it, which is what an operator
+  // needs to look the failure up.
+  if (
+    error instanceof Error &&
+    "code" in error &&
+    typeof (error as { code: unknown }).code === "number"
+  ) {
+    return `${error.name} ${(error as { code: number }).code}: ${error.message}`;
+  }
   if (error instanceof Error) return error.message;
   return "Unknown error";
 }
@@ -154,6 +153,7 @@ export async function reconcileComments(): Promise<void> {
           username: true,
           accessToken: true,
           workspaceId: true,
+          platform: true,
         },
       },
     },
@@ -183,7 +183,7 @@ export async function reconcileComments(): Promise<void> {
   );
 
   const sinceMs = Date.now() - LOOKBACK_HOURS * 60 * 60 * 1000;
-  const tokenCache = new Map<string, InstagramContext | null>();
+  const tokenCache = new Map<string, OpenChannel | null>();
 
   await withConcurrency(automations, SWEEP_CONCURRENCY, async (automation) => {
     const stat = await sweepCampaign({
@@ -224,10 +224,11 @@ async function sweepCampaign({
       username: string;
       accessToken: string;
       workspaceId: string;
+      platform: ChannelPlatform;
     };
   };
   sinceMs: number;
-  tokenCache: Map<string, InstagramContext | null>;
+  tokenCache: Map<string, OpenChannel | null>;
 }): Promise<SweepStat> {
   const account = automation.instagramAccount;
   const stat: SweepStat = {
@@ -242,16 +243,16 @@ async function sweepCampaign({
   };
 
   // Decrypt the account token once per sweep.
-  let accessToken = tokenCache.get(account.id);
-  if (accessToken === undefined) {
+  let channel = tokenCache.get(account.id);
+  if (channel === undefined) {
     try {
-      accessToken = await createInstagramContext(account);
+      channel = await openChannel(account);
     } catch {
-      accessToken = null;
+      channel = null;
     }
-    tokenCache.set(account.id, accessToken);
+    tokenCache.set(account.id, channel);
   }
-  if (!accessToken) {
+  if (!channel) {
     stat.errors.push("Failed to decrypt access token");
     return stat;
   }
@@ -264,8 +265,7 @@ async function sweepCampaign({
     mediaIds.push(...(await adMediaFor(automation.postId)));
   } else if (automation.matchAnyPost) {
     try {
-      const media = await getUserMedia({
-        context: accessToken,
+      const media = await channel.adapter.content.recentMedia(channel.context, {
         limit: RECENT_MEDIA_LIMIT,
       });
       mediaIds.push(...media.map((m) => m.id));
@@ -278,12 +278,11 @@ async function sweepCampaign({
   const queue = getDMQueue();
 
   for (const mediaId of mediaIds) {
-    let comments: InstagramComment[];
+    let comments: ChannelComment[];
     try {
-      comments = await getRecentMediaComments({
-        context: accessToken,
-        mediaId: mediaId,
-        sinceMs: sinceMs,
+      comments = await channel.adapter.content.recentComments(channel.context, {
+        mediaId,
+        sinceMs,
       });
     } catch (error) {
       stat.errors.push(`Comments ${mediaId}: ${errMessage(error)}`);
@@ -293,7 +292,7 @@ async function sweepCampaign({
     // Keep only comments that (a) aren't the account's own, (b) match the
     // keyword, and (c) have no reply from the account owner yet.
     const needsAction = comments.filter((c) => {
-      const authorId = c.from?.id;
+      const authorId = c.authorId;
       if (!authorId || authorId === account.instagramId) return false;
 
       const matched = automation.matchAnyWord
@@ -306,9 +305,7 @@ async function sweepCampaign({
       if (!matched) return false;
       stat.matched += 1;
 
-      const ownerReplied = (c.replies?.data ?? []).some(
-        (r) => r.from?.id === account.instagramId
-      );
+      const ownerReplied = c.replyAuthorIds.includes(account.instagramId);
       if (ownerReplied) {
         stat.alreadyReplied += 1;
         return false;
@@ -337,7 +334,7 @@ async function sweepCampaign({
     const handledSet = new Set(logs.filter((log) => {
       const dmStopped = log.status === "SENT" || log.status === "SKIPPED_PLAN_LIMIT" ||
         log.dmDeliveryUnconfirmed || log.attempts >= MAX_COMMENT_SEND_ATTEMPTS ||
-        (log.status === "FAILED" && hasLegacyUnconfirmedDelivery(log.errorMessage));
+        (log.status === "FAILED" && channel.adapter.errors.isLegacyUnconfirmed(log.errorMessage));
       const replyStopped = !automation.publicReplyEnabled ||
         log.publicReplySentAt || log.publicReplyDeliveryUnconfirmed;
       return dmStopped && replyStopped;
@@ -360,8 +357,9 @@ async function sweepCampaign({
         accountConnectionId: account.id,
         commentId: c.id,
         commentText: c.text ?? "",
-        commenterId: c.from!.id,
-        commenterName: c.from?.username,
+        // The filter above only keeps comments whose author is known.
+        commenterId: c.authorId as string,
+        commenterName: c.authorName ?? undefined,
         mediaId,
         // When the sweep is looking at an ad, the campaign is bound to the post
         // the ad was made from: without this the worker matches nothing and

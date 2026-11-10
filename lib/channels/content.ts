@@ -22,6 +22,15 @@ export interface QuickReplySpec {
 
 export type AttachmentKind = "image" | "video" | "audio" | "file";
 
+/** What kind of file a public URL points at, from its extension. */
+export function inferAttachmentKind(url: string): AttachmentKind {
+  const path = url.split("?")[0].split("#")[0].toLowerCase();
+  if (/\.(jpe?g|png|gif|webp)$/.test(path)) return "image";
+  if (/\.(mp4|mov|webm)$/.test(path)) return "video";
+  if (/\.(mp3|m4a|wav|ogg)$/.test(path)) return "audio";
+  return "file";
+}
+
 export type OutboundContent =
   | { kind: "text"; text: string; quickReplies?: QuickReplySpec[] }
   | { kind: "buttons"; text: string; buttons: ButtonSpec[] }

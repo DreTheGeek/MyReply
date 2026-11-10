@@ -16,7 +16,13 @@ const ADAPTERS: Record<ChannelPlatform, ChannelAdapter> &
 };
 
 export function getChannelAdapter(platform: ChannelPlatform): ChannelAdapter {
-  return ADAPTERS[platform];
+  const adapter = ADAPTERS[platform];
+  // The column is NOT NULL with a default, so this only fires on a row read
+  // without selecting `platform`. Say so, instead of failing on undefined.
+  if (!adapter) {
+    throw new Error(`No channel adapter for platform "${String(platform)}"`);
+  }
+  return adapter;
 }
 
 export function allChannelAdapters(): ChannelAdapter[] {

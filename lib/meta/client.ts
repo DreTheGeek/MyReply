@@ -1,3 +1,4 @@
+import { inferAttachmentKind } from "@/lib/channels/content";
 import { getMetaGraphApiVersion, requireEnv } from "@/lib/env";
 import {
   toMetaQuickReplies,
@@ -450,11 +451,7 @@ export async function sendAttachment(
  * type, so infer it and default to file, which is the most permissive.
  */
 export function inferAttachmentType(url: string): AttachmentType {
-  const path = url.split("?")[0].split("#")[0].toLowerCase();
-  if (/\.(jpe?g|png|gif|webp)$/.test(path)) return "image";
-  if (/\.(mp4|mov|webm)$/.test(path)) return "video";
-  if (/\.(mp3|m4a|wav|ogg)$/.test(path)) return "audio";
-  return "file";
+  return inferAttachmentKind(url);
 }
 
 export async function sendDirectMessage(

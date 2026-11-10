@@ -170,6 +170,7 @@ const mockAutomation = {
   instagramAccount: {
     id: "ig_account_row_1",
     instagramId: "ig_456",
+    platform: "INSTAGRAM",
     accessToken: "encrypted_token_abc",
   },
   workspace: {

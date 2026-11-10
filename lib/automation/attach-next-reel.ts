@@ -1,14 +1,6 @@
 import { prisma } from "@/lib/db/client";
-import {
-  createInstagramContext,
-  hasInstagramCredentials,
-  getUserMedia,
-  type InstagramMedia,
-} from "@/lib/instagram/provider";
-
-function isReel(media: InstagramMedia): boolean {
-  return media.media_product_type === "REELS";
-}
+import type { ChannelMedia } from "@/lib/channels/content";
+import { getChannelAdapter, openChannel } from "@/lib/channels/registry";
 
 export type AttachNextReelResult = {
   checked: number;
@@ -52,14 +44,18 @@ export async function attachPendingNextReels(): Promise<AttachNextReelResult> {
 
   for (const { account, automations } of byAccount.values()) {
     checked += automations.length;
-    if (!account || !hasInstagramCredentials(account)) continue;
+    if (!account || !getChannelAdapter(account.platform).hasCredentials(account)) {
+      continue;
+    }
 
-    let reels: InstagramMedia[];
+    let reels: ChannelMedia[];
     try {
-      const context = await createInstagramContext(account);
-      const media = await getUserMedia({ context, limit: 25 });
+      const channel = await openChannel(account);
+      const media = await channel.adapter.content.recentMedia(channel.context, {
+        limit: 25,
+      });
       reels = media
-        .filter(isReel)
+        .filter((item) => item.isReel)
         .sort(
           (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
         );
@@ -80,7 +76,7 @@ export async function attachPendingNextReels(): Promise<AttachNextReelResult> {
         where: { id: automation.id },
         data: {
           postId: nextReel.id,
-          postUrl: nextReel.permalink ?? null,
+          postUrl: nextReel.permalink,
           pendingNextReel: false,
         },
       });
