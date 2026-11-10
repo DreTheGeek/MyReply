@@ -1448,11 +1448,9 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
   // never. The delay is computed against the workspace's own timezone.
   const quiet = checkQuietHours(automation.workspace, new Date());
   if (quiet.quiet) {
-    await getDMQueue().add(
-      "process-follow-up",
-      job.data,
-      { delay: quiet.retryAfterMs }
-    );
+    await getDMQueue().add(FOLLOWUP_JOB_NAME, job.data, {
+      delay: quiet.retryAfterMs,
+    });
     console.log(
       `[DM Worker] Follow-up held for quiet hours (local ${quiet.localHour}:00 in ${automation.workspace.timezone}), retrying in ${Math.round(quiet.retryAfterMs / 60000)}m`
     );

@@ -1290,6 +1290,51 @@ describe("DM Worker — DM keyword trigger", () => {
   });
 });
 
+describe("DM Worker, follow-ups held for quiet hours", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("requeues a held follow-up under the name the worker routes to the follow-up handler", async () => {
+    // 03:00 UTC, inside the default 21:00 to 09:00 quiet window.
+    vi.useFakeTimers({ now: new Date("2026-09-01T03:00:00Z"), toFake: ["Date"] });
+    mockPrisma.contact.findUnique.mockResolvedValue(null);
+    mockPrisma.automation.findFirst.mockResolvedValue({
+      ...mockAutomation,
+      followUpEnabled: true,
+      followUpMessage: "Thanks for grabbing it",
+      workspace: {
+        id: "workspace_123",
+        timezone: "UTC",
+        quietHoursEnabled: true,
+        quietHoursStart: 21,
+        quietHoursEnd: 9,
+      },
+    });
+
+    const followUp = {
+      instagramAccountId: "ig_456",
+      userId: "commenter_999",
+      automationId: "auto_789",
+    };
+    await getProcessor()({
+      name: "process-followup",
+      data: followUp,
+      id: "followup_job_001",
+      attemptsMade: 0,
+    });
+
+    // Any other name falls through the dispatcher to the comment handler,
+    // which drops a follow-up on the floor instead of sending it at 09:00.
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      "process-followup",
+      followUp,
+      expect.objectContaining({ delay: expect.any(Number) })
+    );
+    expect(mockSendDirectMessage).not.toHaveBeenCalled();
+  });
+});
+
 describe("DM Worker — a person who said stop", () => {
   it("does not reply to someone who opted out, even when they comment the keyword", async () => {
     mockPrisma.contact.findUnique.mockResolvedValue({
