@@ -20,7 +20,7 @@ const {
   mockPrisma: {
     webhookEvent: { create: vi.fn(), update: vi.fn() },
     operationalEvent: { create: vi.fn() },
-    instagramAccount: { findUnique: vi.fn() },
+    instagramAccount: { findMany: vi.fn() },
     automation: { findFirst: vi.fn() },
     dmLog: { findFirst: vi.fn(), findMany: vi.fn() },
     outboundMessage: { findUnique: vi.fn(), create: vi.fn() },
@@ -115,10 +115,11 @@ beforeEach(() => {
   mockPrisma.webhookEvent.create.mockResolvedValue({ id: "we_1" });
   mockPrisma.webhookEvent.update.mockResolvedValue({});
   mockPrisma.operationalEvent.create.mockResolvedValue({});
-  mockPrisma.instagramAccount.findUnique.mockResolvedValue({
-    id: ACCOUNT_ROW_ID,
-    workspaceId: WORKSPACE,
-  });
+  // Every account in a payload is loaded once, up front, and only entries for
+  // a connected account are processed at all.
+  mockPrisma.instagramAccount.findMany.mockResolvedValue([
+    { id: ACCOUNT_ROW_ID, instagramId: ACCOUNT, workspaceId: WORKSPACE },
+  ]);
   mockPrisma.automation.findFirst.mockResolvedValue(null);
   mockPrisma.dmLog.findFirst.mockResolvedValue(null);
   mockPrisma.dmLog.findMany.mockResolvedValue([]);

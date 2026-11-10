@@ -10,6 +10,9 @@ const {
   mockReleaseWorkspaceDMReservation,
 } = vi.hoisted(() => ({
   mockPrisma: {
+    // The durable claim a button or quick reply tap takes before it sends, so a
+    // redelivered tap cannot send twice.
+    postbackDelivery: { create: vi.fn(async () => ({})), delete: vi.fn() },
     automation: { findMany: vi.fn(), findFirst: vi.fn() },
     dmLog: {
       findUnique: vi.fn(),
@@ -39,6 +42,7 @@ vi.mock("@/lib/utils/keyword-matcher", () => ({
 
 vi.mock("@/lib/utils/rate-limiter", () => ({
   reserveDMSlot: mockReserveDMSlot,
+  releaseDMSlot: vi.fn(async () => undefined),
 }));
 
 vi.mock("@/lib/billing/usage", () => ({
@@ -66,7 +70,10 @@ vi.mock("bullmq", () => {
     (global as Record<string, unknown>).__quickReplyWorkerProcessor = processor;
     return { on: vi.fn(), close: vi.fn() };
   }
-  return { Worker: MockWorker };
+  // The worker throws this to stop BullMQ retrying a send whose outcome is
+  // unknown, so the mock has to provide it even where no test reaches it.
+  class UnrecoverableError extends Error {}
+  return { Worker: MockWorker, UnrecoverableError };
 });
 
 // lib/meta/client is deliberately NOT mocked here: the point of these tests is

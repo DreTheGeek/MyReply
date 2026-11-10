@@ -12,6 +12,7 @@
  * here".
  */
 
+import LanguageSwitcher from "@/components/language-switcher";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import WorkspaceSwitcher from "@/components/workspace-switcher";
@@ -32,8 +33,9 @@ const navItems: NavItem[] = [
   { label: "Answers", href: "/answers" },
   { label: "DM Logs", href: "/logs" },
   { label: "Settings", href: "/settings" },
+  { label: "API & MCP", href: "/integrations" },
   { label: "Diagnostics", href: "/diagnostics" },
-];
+] as const;
 
 interface SidebarProps {
   isOpen: boolean;
@@ -149,6 +151,9 @@ export default function Sidebar({
         </nav>
 
         <div className="space-y-2 border-t border-border px-3 py-3">
+          <div className="px-1">
+            <LanguageSwitcher />
+          </div>
           <div className="rounded-md border border-border bg-background px-3 py-2.5">
             <p className="text-xs font-medium text-foreground">Need a hand?</p>
             <p className="mt-0.5 text-[11px] leading-snug text-muted">

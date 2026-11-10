@@ -17,6 +17,9 @@ const { mockPrisma } = vi.hoisted(() => ({
       findFirst: vi.fn(),
       findMany: vi.fn(),
     },
+    // The update and its link changes commit together. The callback runs
+    // against the same mock, which is all a transaction is from here.
+    $transaction: vi.fn(async (run: (tx: unknown) => unknown) => run(mockPrisma)),
   },
 }));
 

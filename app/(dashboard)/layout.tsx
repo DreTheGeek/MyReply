@@ -1,14 +1,22 @@
+import { I18nProvider } from "@/lib/i18n/provider";
+import { getI18n } from "@/lib/i18n/server";
 import { redirect } from "next/navigation";
 import DashboardShell from "@/components/dashboard-shell";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
 import { ensureWorkspaceForUser, getWorkspaceMembership } from "@/lib/workspace";
 
+export async function generateMetadata() {
+  const { t } = await getI18n();
+  return { title: t("MyReply - Open source Instagram comment-to-DM automation") };
+}
+
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const { locale } = await getI18n();
   const session = await auth();
 
   if (!session?.user?.id) {
@@ -35,16 +43,18 @@ export default async function DashboardLayout({
   });
 
   return (
-    <DashboardShell
-      workspaceName={workspace.name}
-      workspaceId={workspace.id}
-      instagramUsername={accounts[0]?.username ?? null}
-      instagramAccountCount={accounts.length}
-      userName={session.user.name ?? null}
-      userEmail={session.user.email ?? null}
-      role={membership?.role ?? "MEMBER"}
-    >
-      {children}
-    </DashboardShell>
+    <I18nProvider locale={locale}>
+      <DashboardShell
+        workspaceName={workspace.name}
+        workspaceId={workspace.id}
+        instagramUsername={accounts[0]?.username ?? null}
+        instagramAccountCount={accounts.length}
+        userName={session.user.name ?? null}
+        userEmail={session.user.email ?? null}
+        role={membership?.role ?? "MEMBER"}
+      >
+        {children}
+      </DashboardShell>
+    </I18nProvider>
   );
 }

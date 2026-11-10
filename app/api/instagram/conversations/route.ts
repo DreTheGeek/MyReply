@@ -15,11 +15,12 @@ import {
   getConversations,
   sendDirectMessage,
   MetaApiError,
-} from "@/lib/meta/client";
-import { decryptToken } from "@/lib/meta/oauth";
+} from "@/lib/instagram/provider";
+import { createInstagramContext } from "@/lib/instagram/provider";
 
 export interface ConversationListItem {
   id: string;
+  detailsUnavailable?: boolean;
   contact: { id: string; username: string | null };
   updatedTime: string | null;
   lastMessage: {
@@ -56,19 +57,21 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const accessToken = decryptToken(account.accessToken);
-    const raw = await getConversations(accessToken, account.instagramId);
+    const accessToken = await createInstagramContext(account);
+    const raw = await getConversations({
+      context: accessToken,
+      igUserId: account.instagramId,
+    });
 
     const conversations: ConversationListItem[] = raw.map((c) => {
       const participants = c.participants?.data ?? [];
       const contact =
-        participants.find((p) => p.id !== account.instagramId) ??
-        participants[0] ??
-        null;
+        participants.find((p) => p.id !== account.instagramId) ?? null;
       const last = c.messages?.data?.[0] ?? null;
 
       return {
         id: c.id,
+        detailsUnavailable: c.detailsUnavailable,
         contact: {
           id: contact?.id ?? "",
           username: contact?.username ?? null,
@@ -99,7 +102,10 @@ export async function GET(request: NextRequest) {
       err instanceof MetaApiError
         ? err.message
         : "Failed to load conversations";
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: message },
+      { status: 500 }
+    );
   }
 }
 
@@ -194,13 +200,13 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const accessToken = decryptToken(account.accessToken);
-    const result = await sendDirectMessage(
-      accessToken,
-      account.instagramId,
-      recipientId,
-      text
-    );
+    const accessToken = await createInstagramContext(account);
+    const result = await sendDirectMessage({
+      context: accessToken,
+      instagramAccountId: account.instagramId,
+      userId: recipientId,
+      message: text,
+    });
     return NextResponse.json({ success: true, data: result });
   } catch (err) {
     await releaseWorkspaceDMReservation(context.workspaceId, usage.periodStart);
@@ -209,6 +215,9 @@ export async function POST(request: NextRequest) {
     // window having closed, which the user needs to see explicitly.
     const message =
       err instanceof MetaApiError ? err.message : "Failed to send message";
-    return NextResponse.json({ success: false, error: message }, { status: 502 });
+    return NextResponse.json(
+      { success: false, error: message },
+      { status: 502 }
+    );
   }
 }

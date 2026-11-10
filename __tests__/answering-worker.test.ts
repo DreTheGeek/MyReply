@@ -33,7 +33,7 @@ const {
       update: vi.fn(),
       create: vi.fn(),
     },
-    instagramAccount: { findUnique: vi.fn() },
+    instagramAccount: { findUnique: vi.fn(), findFirst: vi.fn() },
     operationalEvent: { create: vi.fn() },
   },
   mockAnswerInboundMessage: vi.fn(),
@@ -58,6 +58,9 @@ vi.mock("@/lib/ai/answering-settings", () => ({
 }));
 
 vi.mock("@/lib/meta/client", () => ({
+  // Read by the {username} lookup on the DM path. Null falls back to the
+  // message as written, which is what these tests assert on.
+  getUserUsername: vi.fn(async () => null),
   MetaApiError: class MetaApiError extends Error {},
   RateLimitError: class RateLimitError extends Error {},
   TokenExpiredError: class TokenExpiredError extends Error {},
@@ -87,6 +90,7 @@ vi.mock("@/lib/contacts", () => ({
 
 vi.mock("@/lib/utils/rate-limiter", () => ({
   reserveDMSlot: vi.fn(async () => ({ allowed: true, reserved: true })),
+  releaseDMSlot: vi.fn(async () => undefined),
 }));
 
 vi.mock("@/lib/billing/usage", () => ({
@@ -199,7 +203,7 @@ beforeEach(() => {
   mockPrisma.dmLog.findUnique.mockResolvedValue(null);
   mockPrisma.dmLog.findFirst.mockResolvedValue(null);
   mockPrisma.dmLog.upsert.mockResolvedValue({});
-  mockPrisma.instagramAccount.findUnique.mockResolvedValue({
+  mockPrisma.instagramAccount.findFirst.mockResolvedValue({
     id: "ig_account_row_1",
     instagramId: "ig_456",
     accessToken: "encrypted_token",

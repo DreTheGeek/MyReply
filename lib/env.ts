@@ -50,16 +50,58 @@ export function getMetaGraphApiVersion(): string {
   return process.env.META_GRAPH_API_VERSION ?? "v25.0";
 }
 
+/**
+ * The public demo, and the only host where sign-in is blocked. This repo is
+ * something other people clone and deploy; a self-hoster's own domain must
+ * never match this and must never be blocked from logging in — that's the
+ * entire point of self-hosting. Keep this in sync with
+ * components/demo-notice.tsx, which uses the same host for its banner.
+ */
+export const DEMO_HOST = "openreply.diwen.dev";
+
+/**
+ * True when the current request is hitting the public demo host. Sign-in is
+ * blocked there so the demo can't be mistaken for a real account — anyone who
+ * wants an account instead clones the repo and runs their own instance.
+ *
+ * Reads the incoming Host header rather than NEXTAUTH_URL/an env flag, so a
+ * self-hosted deployment never accidentally inherits demo behavior just
+ * because it copied an env var from this repo.
+ */
+export async function isPublicDemoHost(): Promise<boolean> {
+  const { headers } = await import("next/headers");
+  const host = (await headers()).get("host") ?? "";
+  return host.split(":")[0].toLowerCase() === DEMO_HOST;
+}
+
+/**
+ * Optional sign-in allowlist.
+ *
+ * A self-hosted instance on a public domain is open to signup: the email
+ * provider creates an account for whoever asks for a magic link, and that
+ * account gets its own workspace. ALLOWED_EMAILS closes it to a comma-separated
+ * list of addresses. Left unset, sign-in behaves exactly as before, so an
+ * existing deployment is unaffected.
+ */
+export function isEmailAllowedToSignIn(
+  email: string | null | undefined
+): boolean {
+  const allowed = (process.env.ALLOWED_EMAILS ?? "")
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (allowed.length === 0) return true;
+  if (!email) return false;
+  return allowed.includes(email.toLowerCase());
+}
+
 export const serverEnvSchema = z.object({
   NEXTAUTH_URL: z.string().url(),
   NEXTAUTH_SECRET: z.string().min(16),
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
   ENCRYPTION_KEY: z.string().regex(HEX_32_BYTE),
-  INSTAGRAM_APP_ID: z.string().min(1),
-  INSTAGRAM_APP_SECRET: z.string().min(1),
-  FACEBOOK_APP_SECRET: z.string().min(1),
-  WEBHOOK_VERIFY_TOKEN: z.string().min(1),
 });
 
 export function validateCoreEnv() {

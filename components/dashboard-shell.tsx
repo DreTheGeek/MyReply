@@ -105,7 +105,10 @@ function PortalLayout({
           alertCount={alertTotal + tasks.length}
         />
 
-        <main className="min-w-0 flex-1 overflow-y-auto">
+        {/* overflow-x-hidden: enabling vertical scrolling makes the browser
+            allow horizontal scrolling too, which lets a wide child drag the
+            whole page sideways on a phone. */}
+        <main className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
           <div className="px-4 py-5 lg:px-6">{children}</div>
         </main>
       </div>

@@ -6,6 +6,7 @@
  * Shows all campaigns as cards with toggle and delete.
  */
 
+import { useI18n } from "@/lib/i18n/provider";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -95,6 +96,7 @@ function describeResults(
 }
 
 export default function CampaignsPage() {
+  const { t, label } = useI18n();
   const router = useRouter();
   const [automations, setAutomations] = useState<Campaign[]>([]);
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
@@ -288,7 +290,7 @@ export default function CampaignsPage() {
   }
 
   async function deleteAutomation(id: string) {
-    if (!confirm("Delete this campaign? This cannot be undone.")) return;
+    if (!confirm(t("Delete this campaign? This cannot be undone."))) return;
     setActionError(null);
     try {
       const res = await fetch(`/api/automations?id=${id}`, { method: "DELETE" });
@@ -306,37 +308,14 @@ export default function CampaignsPage() {
     }
   }
 
-  async function duplicateAutomation(auto: Campaign) {
+  // The copy is made server-side from the stored campaign, so settings this
+  // list never loads (the DM trigger, the follow-up, the link button label)
+  // still come along.
+  async function duplicateAutomation(id: string) {
     setMenuOpenId(null);
-    const specific = !auto.matchAnyPost && !auto.pendingNextReel;
     try {
-      const res = await fetch("/api/automations", {
+      const res = await fetch(`/api/automations/duplicate?id=${id}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: `${auto.name} copy`,
-          instagramAccountId: auto.instagramAccountId,
-          postId: specific ? auto.postId : null,
-          postUrl: specific ? auto.postUrl : null,
-          matchAnyPost: auto.matchAnyPost,
-          pendingNextReel: auto.pendingNextReel,
-          matchAnyWord: auto.matchAnyWord,
-          keywords: auto.keywords,
-          dmMessage: auto.dmMessage,
-          openingDmEnabled: auto.openingDmEnabled,
-          openingDmMessage: auto.openingDmMessage,
-          openingDmButtonLabel: auto.openingDmButtonLabel,
-          publicReplyEnabled: auto.publicReplyEnabled,
-          publicReplyMessages: auto.publicReplyMessages,
-          trackedDestinationUrl: auto.trackedLinks[0]?.destinationUrl ?? "",
-          secondaryDestinationUrl: auto.trackedLinks[1]?.destinationUrl ?? "",
-          secondaryButtonLabel: auto.trackedLinks[1]?.label ?? "Open link",
-          requireFollow: auto.requireFollow,
-          followPromptMessage: auto.followPromptMessage,
-          followPromptButtonLabel: auto.followPromptButtonLabel,
-          wholeWordMatch: auto.wholeWordMatch,
-          isActive: false,
-        }),
       });
       const data = await res.json();
       if (data.success) {
@@ -399,11 +378,9 @@ export default function CampaignsPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-sm text-muted">
-            {filtered.length}
             {filtered.length !== automations.length
-              ? ` of ${automations.length}`
-              : ""}{" "}
-            campaign{automations.length !== 1 ? "s" : ""}
+              ? t("{count} of {total} campaigns", { count: filtered.length, total: automations.length })
+              : t(automations.length === 1 ? "{count} campaign" : "{count} campaigns", { count: automations.length })}
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
@@ -418,13 +395,13 @@ export default function CampaignsPage() {
             href="/campaigns/import"
             className="flex-1 rounded border border-border px-4 py-2 text-center text-sm font-medium text-muted hover:text-foreground sm:flex-none"
           >
-            Import
+            {t("Import")}
           </Link>
           <Link
             href="/campaigns/new"
             className="flex-1 rounded bg-accent px-4 py-2 text-center text-sm font-medium text-on-accent hover:bg-accent-hover sm:flex-none"
           >
-            New Campaign
+            {t("New Campaign")}
           </Link>
         </div>
       </div>
@@ -458,13 +435,13 @@ export default function CampaignsPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search campaigns by name, keyword, or message"
+            placeholder={t("Search campaigns by name, keyword, or message…")}
             className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
           />
           <div className="inline-flex shrink-0 rounded-lg bg-surface p-1">
             {(["all", "active", "paused"] as const).map((s) => (
               <button
-                key={s}
+                key={label(s)}
                 type="button"
                 onClick={() => setStatusFilter(s)}
                 className={`rounded-md px-3 py-1.5 text-sm capitalize transition-colors ${
@@ -473,7 +450,7 @@ export default function CampaignsPage() {
                     : "text-muted hover:text-foreground"
                 }`}
               >
-                {s}
+                {label(s)}
               </button>
             ))}
           </div>
@@ -516,16 +493,15 @@ export default function CampaignsPage() {
       {/* Empty state */}
       {!loadError && automations.length === 0 && (
         <div className="panel rounded p-8 text-center sm:p-12">
-          <h3 className="mb-2 text-lg font-semibold">No campaigns yet</h3>
-          <p className="mx-auto mb-6 max-w-sm text-sm text-muted">
-            Create your first comment-to-DM campaign to turn a post or reel into
-            a measurable conversation flow.
+          <h3 className="text-lg font-semibold mb-2">{t("No campaigns yet")}</h3>
+          <p className="text-sm text-muted mb-6 max-w-sm mx-auto">
+            {t("Create your first comment-to-DM campaign to turn a post or reel into a measurable conversation flow.")}
           </p>
           <Link
             href="/campaigns/new"
             className="inline-flex items-center gap-2 rounded bg-accent px-5 py-2.5 text-sm font-semibold text-on-accent transition-colors hover:bg-accent-hover"
           >
-            Create Campaign
+            {t("Create Campaign")}
           </Link>
         </div>
       )}
@@ -533,7 +509,7 @@ export default function CampaignsPage() {
       {/* No matches for the current filter */}
       {!loadError && automations.length > 0 && filtered.length === 0 && (
         <div className="panel rounded p-8 text-center text-sm text-muted">
-          No campaigns match your search.
+          {t("No campaigns match your search.")}
         </div>
       )}
 
@@ -698,7 +674,7 @@ export default function CampaignsPage() {
                                 </button>
                               )}
                               <button
-                                onClick={() => void duplicateAutomation(auto)}
+                                onClick={() => void duplicateAutomation(auto.id)}
                                 className="block w-full px-3 py-2 text-left text-sm text-foreground hover:bg-surface-hover"
                               >
                                 Duplicate
@@ -743,7 +719,7 @@ export default function CampaignsPage() {
                   rel="noreferrer"
                   className="text-zinc-300 hover:text-white"
                 >
-                  Open on Instagram
+                  {t("Open on Instagram")}
                 </a>
               )}
               <button
@@ -751,7 +727,7 @@ export default function CampaignsPage() {
                 onClick={() => setPlayingVideo(null)}
                 className="text-zinc-300 hover:text-white"
               >
-                Close
+                {t("Close")}
               </button>
             </div>
             <video

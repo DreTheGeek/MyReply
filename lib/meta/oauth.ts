@@ -7,7 +7,12 @@ import {
 } from "crypto";
 import { getEncryptionKeyHex, requireEnv } from "@/lib/env";
 
-const INSTAGRAM_OAUTH_URL = "https://api.instagram.com/oauth/authorize";
+// Instagram API with Instagram Login authorizes on www.instagram.com. The old
+// api.instagram.com/oauth/authorize host belonged to the retired Basic Display
+// API and now 404s ("Sorry, this page isn't available"), which looks like a bad
+// link rather than a wrong endpoint. The token exchange below still lives on
+// api.instagram.com — only the authorize hop moved.
+const INSTAGRAM_OAUTH_URL = "https://www.instagram.com/oauth/authorize";
 const INSTAGRAM_TOKEN_URL = "https://api.instagram.com/oauth/access_token";
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;
@@ -59,7 +64,20 @@ export function verifyOAuthState(state: string | null): OAuthStatePayload | null
 
   try {
     const parsed = JSON.parse(base64UrlDecode(payload)) as OAuthStatePayload;
-    if (!parsed.workspaceId || Date.now() - parsed.ts > STATE_MAX_AGE_MS) {
+    if (typeof parsed.workspaceId !== "string" || !parsed.workspaceId) {
+      return null;
+    }
+
+    // Reject a missing or non-numeric timestamp. `Date.now() - "abc"` is NaN,
+    // and every comparison against NaN is false, so a non-numeric ts would
+    // otherwise pass the age check and never expire. A ts in the future is
+    // rejected for the same reason: it has not aged at all.
+    if (typeof parsed.ts !== "number" || !Number.isFinite(parsed.ts)) {
+      return null;
+    }
+
+    const age = Date.now() - parsed.ts;
+    if (age < 0 || age > STATE_MAX_AGE_MS) {
       return null;
     }
 

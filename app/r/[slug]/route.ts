@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
 import { checkRateLimit } from "@/lib/oauth/rate-limit";
-import { getRequestIp, hashClickIp } from "@/lib/tracking/server";
+import {
+  getRequestIp,
+  hashClickIp,
+  parseRecipientToken,
+} from "@/lib/tracking/server";
 
 type RedirectRouteProps = {
   params: Promise<{ slug: string }>;
@@ -79,6 +83,9 @@ export async function GET(request: NextRequest, { params }: RedirectRouteProps) 
           instagramAccountId: trackedLink.automation.instagramAccountId,
           trackedLinkId: trackedLink.id,
           ipHash,
+          recipientHash: parseRecipientToken(
+            new URL(request.url).searchParams.get("r")
+          ),
           userAgent: request.headers.get("user-agent"),
           referrer: request.headers.get("referer"),
         },

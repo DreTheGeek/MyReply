@@ -4,6 +4,8 @@ import { prisma } from "@/lib/db/client";
 import { qualified } from "@/lib/db/schema";
 import {
   calculateCtr,
+  CLICK_ROW_SELECT,
+  countUniqueClicks,
   normalizeTopKeywords,
   summarizeDmStatuses,
 } from "@/lib/tracking/analytics";
@@ -74,8 +76,8 @@ export async function GET(request: NextRequest) {
     dmsSentMonth,
     totalDMs,
     dmStatusCountsThisMonth,
-    clicksThisMonth,
-    totalClicks,
+    clickRowsThisMonth,
+    allClickRows,
     topKeywordRows,
     recentLogs,
     user,
@@ -95,6 +97,7 @@ export async function GET(request: NextRequest) {
         id: true,
         username: true,
         instagramId: true,
+        provider: true,
         tokenExpiresAt: true,
         webhookSubscribed: true,
       },
@@ -107,6 +110,7 @@ export async function GET(request: NextRequest) {
         username: true,
         instagramId: true,
         name: true,
+        provider: true,
         tokenExpiresAt: true,
         webhookSubscribed: true,
       },
@@ -147,10 +151,14 @@ export async function GET(request: NextRequest) {
       where: { workspaceId, createdAt: { gte: monthStart }, ...accountFilter },
       _count: { _all: true },
     }),
-    prisma.linkClick.count({
+    prisma.linkClick.findMany({
       where: { workspaceId, createdAt: { gte: monthStart }, ...accountFilter },
+      select: CLICK_ROW_SELECT,
     }),
-    prisma.linkClick.count({ where: { workspaceId, ...accountFilter } }),
+    prisma.linkClick.findMany({
+      where: { workspaceId, ...accountFilter },
+      select: CLICK_ROW_SELECT,
+    }),
     prisma.dmLog.groupBy({
       by: ["matchedKeyword"],
       where: { workspaceId, matchedKeyword: { not: null }, ...accountFilter },
@@ -206,6 +214,9 @@ export async function GET(request: NextRequest) {
       count,
     });
   }
+
+  const clicksThisMonth = countUniqueClicks(clickRowsThisMonth);
+  const totalClicks = countUniqueClicks(allClickRows);
 
   const monthlyStatusSummary = summarizeDmStatuses(
     dmStatusCountsThisMonth.map((row) => ({

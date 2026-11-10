@@ -10,22 +10,31 @@ Open-sourced ManyChat for Instagram comment-to-DM automation.
 
 </div>
 
-Someone comments `LINK` on your reel, and they get a DM with your link a second later. That is the whole idea. OpenReply watches the comments on your Instagram posts, and when a comment matches a keyword you set, it sends that person a private reply through the official Meta API. You can also post a public reply under the comment at the same time.
+Someone comments `LINK` on your reel, and OpenReply queues a DM with your link. That is the whole idea. OpenReply watches the comments on your Instagram posts, and when a comment matches a keyword you set, it sends that person a private reply through the official Meta API. You can also post a public reply under the comment at the same time.
 
-ManyChat does this and charges a monthly fee. OpenReply is the same core feature, free, running on your own infrastructure, with no seat limits and no plan caps.
+OpenReply is free, MIT-licensed software running on your own infrastructure, with no software seat limits or plan caps. Hosting and optional provider costs are separate.
+
+> **Supported by [Zernio](https://zernio.com/?utm_source=openreply&utm_medium=sponsorship&utm_campaign=openreply-integration&utm_content=readme-sponsor).** An optional paid Instagram connection provider that lets you avoid creating and reviewing your own Meta app. OpenReply still runs your campaigns, queues, logs, and inbox on your infrastructure. [Connect with Zernio](docs/zernio.md), or keep using your own Meta app.
+
+> **OpenReply is self-hosted. You have to deploy your own copy.**
+>
+> [openreply.diwen.dev](https://openreply.diwen.dev) is a demo of the dashboard, not a service you can sign up for. Creating an account there will never send a DM for you, and there is no hosted plan to upgrade to.
+>
+> A working instance needs your deployed fork, a public HTTPS URL, PostgreSQL, Redis, a running worker, and an Instagram connection. Choose optional paid Zernio or your own Meta app. [docs/setup.md](docs/setup.md) walks through all of it.
 
 > If this saves you a subscription or a weekend of building, a star on the repo genuinely helps other people find it.
 
 ## Why this exists
 
-Comment-to-DM is one feature, but every tool that offers it wants a recurring subscription for it. The actual work is a webhook, a keyword match, and one API call to Meta. That does not need to cost anything to run for a single account.
+Comment-to-DM is one feature, but every tool that offers it wants a recurring subscription for it. OpenReply makes that workflow available as software you can inspect, modify, and host yourself.
 
-OpenReply is built around Meta's official Instagram private replies. It does not scrape, it does not automate a browser, and it never asks for an Instagram password. That keeps your account inside Meta's rules, which matters if you care about not getting flagged.
+OpenReply is built around Meta's official Instagram private replies. It does not scrape, it does not automate a browser, and it never asks for an Instagram password. Instagram’s policies, permissions, messaging windows, and rate limits still apply.
 
 ## Features
 
 - Keyword to DM. Match one or many keywords per post, whole-word or partial.
 - Optional public reply. Post a visible comment reply on top of the DM.
+- DM and Story reply triggers. The same keywords can also fire on an inbound DM, which covers text replies to your Stories, since Instagram delivers those as DMs. That makes `Reply LINK to this Story` work with no post involved. Turn it on per campaign, and subscribe to the `messages` webhook field if you use your own Meta app. Zernio webhook registration is automatic.
 - Tracked links. Swap a link for a tracked redirect and see clicks and CTR per campaign.
 - Two link buttons. Send up to two tappable link buttons in one DM, each a separate tracked link with its own click stats.
 - Follow gate. Optionally require a follow before you hand over the link. The DM asks the commenter to follow and tap a button; on tap, OpenReply checks Meta's `is_user_follow_business` flag and only sends the link once they follow, re-prompting until then. It fails open (sends the link anyway) when Instagram does not return follow status, so a real follower is never trapped.
@@ -34,15 +43,17 @@ OpenReply is built around Meta's official Instagram private replies. It does not
 - Multiple Instagram accounts. Connect several professional accounts under one workspace, each with its own limits.
 - Workspaces and roles. Owner, admin, and member roles with invite links, useful if you run this for clients.
 - Campaign templates. Start from a preset instead of a blank form.
+- English, Traditional Chinese, Brazilian Portuguese and Russian interface, with a saved language preference. See [interface languages](docs/localization.md).
+- Read-only API and MCP for campaign settings, destination links and aggregate stats, with workspace-scoped revocable keys (30/60/90 days). See [integrations](docs/integrations.md).
 - Inbox. Read your Instagram DM conversations and reply from the dashboard, inside Meta's 24-hour messaging window. Cached so it loads instantly on repeat visits.
 - DM logs. Every send, skip, and failure is logged with a reason.
 - Self-comment filtering. Your own comments never trigger a reply, since Meta rejects DMing yourself anyway.
 
 ## How it works
 
-1. Someone comments on your Instagram post or reel.
-2. Meta sends a webhook to your OpenReply instance.
-3. OpenReply checks the comment against your active campaigns.
+1. Someone comments on your Instagram post or reel, or DMs you, or replies to your Story.
+2. Your connection provider (direct Meta or Zernio) delivers the event to your OpenReply instance.
+3. OpenReply checks the text against your active campaigns.
 4. On a keyword match, it queues a job.
 5. A background worker sends the private reply, and the public reply if you enabled one.
 
@@ -50,11 +61,17 @@ The web app receives the webhook and serves the dashboard. A separate worker pro
 
 ## Quick start
 
-You need a few free accounts before anything works: a Meta developer app, a Resend account for login emails, and somewhere to host (Vercel for the web app, Railway for the worker plus Postgres and Redis). The Instagram account you connect has to be a Business or Creator account, not a personal one.
+1. **Choose your Instagram connection.** [Zernio](docs/zernio.md) is recommended if you want to avoid setting up your own Meta app. It is a paid service and sponsor, not a hosted OpenReply plan. Or follow the existing [direct Meta setup](docs/setup.md#the-meta-app).
+2. **Deploy the app and worker.** Both paths need PostgreSQL, Redis, a public HTTPS URL, and email delivery for magic-link sign-in.
+3. **Connect an Instagram Business or Creator account** in Settings, create a campaign, and test a keyword comment from another account.
 
-The honest version: the code deploys in minutes, but the Meta app setup is the part that takes real time. Read [docs/setup.md](docs/setup.md) before you start. It is the single setup guide, covering hosting, your domain, the environment, and every Meta wrong turn so you do not have to find them yourself.
+Read [docs/setup.md](docs/setup.md) for the complete walkthrough, including a provider-aware AI assistant prompt. Existing accounts are never automatically migrated. Check [Zernio’s feature limits](docs/zernio.md#feature-availability) before choosing.
+
+**Moving from ManyChat or another DM tool?** Disconnect it from the Instagram account and give OpenReply control of conversations in Meta Business Suite, or button taps in DMs will fail with "not the thread owner". See [Migrating from ManyChat](docs/setup.md#migrating-from-manychat-or-another-dm-tool-give-openreply-control-of-conversations).
 
 ### Deploy the web app
+
+The button creates your web deployment. You still need to configure the database, Redis, email delivery, and a separate always-on worker.
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/diwenne/openreply)
 
@@ -66,6 +83,7 @@ cd openreply
 npm install
 cp .env.example .env      # then fill in the values, see docs/setup.md
 docker-compose up -d      # starts Postgres and Redis
+npm run db:generate
 npm run db:migrate
 npm run dev               # web app on http://localhost:3000
 npm run worker            # in a second terminal, this sends the DMs
@@ -77,7 +95,7 @@ Full environment variables and the production layout are in [docs/setup.md](docs
 
 ## Set it up with your AI assistant
 
-If you use Claude Code, Cursor, or a similar tool, the Meta setup is a lot faster with an assistant driving it. There is a ready-made prompt in the [Set it up with an AI assistant](docs/setup.md#set-it-up-with-an-ai-assistant) section of the setup guide. Paste it into your assistant inside a clone of this repo, hand over your keys as it asks, and it will walk you through connecting Instagram and going live.
+If you use Claude Code, Cursor, or a similar tool, an assistant can walk you through either connection path. There is a ready-made prompt in the [Set it up with an AI assistant](docs/setup.md#set-it-up-with-an-ai-assistant) section of the setup guide. Paste it into your assistant inside a clone of this repo, choose your provider before configuring any Meta secrets, and it will walk you through connecting Instagram and going live.
 
 ## Tech stack
 
@@ -105,7 +123,17 @@ Built and maintained by Diwen Huang.
 - X: [@diwenne](https://x.com/diwennee)
 - Instagram: [@devdiwen](https://instagram.com/devdiwen)
 
-OpenReply is a fork of [instagram-comment-to-dm](https://github.com/im-anishraj/instagram-comment-to-dm) by [Anish Raj](https://github.com/im-anishraj), also MIT licensed. The billing layer and plan caps were removed, and the setup was documented from scratch.
+OpenReply was initially forked from [instagram-comment-to-dm](https://github.com/im-anishraj/instagram-comment-to-dm) by [Anish Raj](https://github.com/im-anishraj), also MIT licensed, and has been substantially built upon since.
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=diwenne%2Fopenreply&type=date&legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=diwenne/openreply&type=date&theme=dark&legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=diwenne/openreply&type=date&legend=top-left" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=diwenne/openreply&type=date&legend=top-left" />
+  </picture>
+</a>
 
 ## Star the repo
 

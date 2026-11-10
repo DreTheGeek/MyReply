@@ -2,6 +2,7 @@ import { validateWorkerEnv } from "@/lib/env";
 import { createDMWorker } from "@/lib/queue/dm-worker";
 import { recordWorkerHeartbeat } from "@/lib/ops/worker-health";
 import { reconcileComments } from "@/lib/polling/comment-reconciler";
+import { attachPendingNextReels } from "@/lib/automation/attach-next-reel";
 import os from "node:os";
 
 // Validated against the WORKER's contract, not the web app's.
@@ -50,6 +51,10 @@ const heartbeatTimer = setInterval(() => void heartbeat(), HEARTBEAT_INTERVAL_MS
 
 async function poll() {
   try {
+    const attached = await attachPendingNextReels();
+    if (attached.bound > 0 || attached.failedAccounts > 0) {
+      console.log("[DM Worker] Next-reel attachment:", attached);
+    }
     await reconcileComments();
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";

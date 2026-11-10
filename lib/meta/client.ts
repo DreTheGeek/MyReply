@@ -26,23 +26,40 @@ export class MetaApiError extends Error {
   }
 }
 
+// These subclasses carry the subcode and the code Meta actually sent. The
+// subcode is the only thing that separates a permanent rejection (a comment
+// not eligible for a private reply, sub=2534025) from one worth retrying, and
+// the fixed code made a 10 or a 200 arrive as a 100 — which is what
+// `isTemplateRejection` in the DM worker tests for before it tries another
+// send. Both arguments default to the previous values, so existing call sites
+// are unaffected.
 export class TokenExpiredError extends MetaApiError {
-  constructor(message: string, fbTraceId?: string) {
-    super(190, undefined, fbTraceId, message);
+  constructor(message: string, fbTraceId?: string, subcode?: number) {
+    super(190, subcode, fbTraceId, message);
     this.name = "TokenExpiredError";
   }
 }
 
 export class RateLimitError extends MetaApiError {
-  constructor(message: string, fbTraceId?: string) {
-    super(368, undefined, fbTraceId, message);
+  constructor(
+    message: string,
+    fbTraceId?: string,
+    subcode?: number,
+    code = 368
+  ) {
+    super(code, subcode, fbTraceId, message);
     this.name = "RateLimitError";
   }
 }
 
 export class PermissionError extends MetaApiError {
-  constructor(message: string, fbTraceId?: string) {
-    super(100, undefined, fbTraceId, message);
+  constructor(
+    message: string,
+    fbTraceId?: string,
+    subcode?: number,
+    code = 100
+  ) {
+    super(code, subcode, fbTraceId, message);
     this.name = "PermissionError";
   }
 }
@@ -125,19 +142,26 @@ export async function handleResponse<T>(response: Response): Promise<T> {
     const code = err?.code ?? response.status;
     const subcode = err?.error_subcode;
     const traceId = err?.fbtrace_id;
-    const message = err?.message ?? "Unknown Meta API error";
+    // Without the path a Meta error is unattributable: a connect runs several
+    // calls in a row that fail with the identical message. The query string is
+    // dropped on purpose — it carries the access token.
+    let path = "";
+    try {
+      path = ` (${new URL(response.url).pathname})`;
+    } catch {}
+    const message = `${err?.message ?? "Unknown Meta API error"}${path} [code=${code} sub=${subcode ?? "-"} type=${err?.type ?? "-"} trace=${traceId ?? "-"}]`;
 
     switch (code) {
       case 190:
-        throw new TokenExpiredError(message, traceId);
+        throw new TokenExpiredError(message, traceId, subcode);
       case 368:
       case 4:
       case 17:
-        throw new RateLimitError(message, traceId);
+        throw new RateLimitError(message, traceId, subcode, code);
       case 10:
       case 100:
       case 200:
-        throw new PermissionError(message, traceId);
+        throw new PermissionError(message, traceId, subcode, code);
       default:
         throw new MetaApiError(code, subcode, traceId, message);
     }
@@ -279,6 +303,37 @@ export async function getUserFollowStatus(
     const data = await response.json();
     return typeof data?.is_user_follow_business === "boolean"
       ? data.is_user_follow_business
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The handle behind an IGSID, for personalizing a message to someone who
+ * messaged the account. The messages and postbacks webhooks carry only the
+ * sender's id, unlike the comments webhook, which carries the username.
+ *
+ * Instagram answers this for anyone who has an open conversation with the
+ * account, which is exactly who arrives on those two paths. null when the
+ * handle cannot be read, so the caller falls back as before.
+ */
+export async function getUserUsername(
+  accessToken: string,
+  recipientId: string
+): Promise<string | null> {
+  const url = new URL(`${instagramGraphBase()}/${recipientId}`);
+  url.searchParams.set("fields", "username");
+
+  try {
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return typeof data?.username === "string" && data.username
+      ? data.username
       : null;
   } catch {
     return null;
@@ -639,32 +694,100 @@ export interface InstagramMessage {
 
 export interface InstagramConversation {
   id: string;
+  detailsUnavailable?: boolean;
   updated_time?: string;
   participants?: { data: InstagramParticipant[] };
   messages?: { data: InstagramMessage[] };
 }
 
 /**
- * List the account's DM conversations, newest first, each with its participants
- * and a one-message preview. `igUserId` is the account's professional user_id
- * (the same id used to send messages and as webhook entry.id).
+ * Load up to 50 recent conversations. A single broken field expansion can make
+ * Meta reject the entire page with code 1 (upstream issue #60). Halve only those
+ * failing pages until the affected conversation is isolated, then retain its
+ * basic metadata and advance using the OUTER conversation cursor.
+ *
+ * Healthy accounts still need just one request. Auth, permission, rate-limit,
+ * transport and minimal-list failures remain visible rather than looking empty.
  */
 export async function getConversations(
   accessToken: string,
   igUserId: string
 ): Promise<InstagramConversation[]> {
-  const url = new URL(`${instagramGraphBase()}/${igUserId}/conversations`);
-  url.searchParams.set("platform", "instagram");
-  url.searchParams.set(
-    "fields",
-    "participants,updated_time,messages.limit(1){message,from,created_time}"
-  );
-  url.searchParams.set("limit", "50");
-  url.searchParams.set("access_token", accessToken);
+  const fields =
+    "participants,updated_time,messages.limit(1){message,from,created_time}";
+  type Page = {
+    data?: InstagramConversation[];
+    paging?: { next?: string; cursors?: { after?: string } };
+  };
+  const results: InstagramConversation[] = [];
+  const seenIds = new Set<string>();
+  const seenCursors = new Set<string>();
+  let after: string | undefined;
+  let pageSize = 50;
 
-  const response = await fetch(url.toString());
-  const data = await handleResponse<{ data: InstagramConversation[] }>(response);
-  return data.data ?? [];
+  async function readPage(limit: number, requestedFields: string): Promise<Page> {
+    // Never follow Meta's next URL: rebuild on our trusted host and carry the
+    // token separately. A messages.paging cursor must never advance this list.
+    const url = new URL(`${instagramGraphBase()}/${igUserId}/conversations`);
+    url.searchParams.set("platform", "instagram");
+    url.searchParams.set("fields", requestedFields);
+    url.searchParams.set("limit", String(limit));
+    if (after) url.searchParams.set("after", after);
+    return handleResponse<Page>(
+      await fetch(url.toString(), {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        signal: AbortSignal.timeout(10_000),
+      })
+    );
+  }
+
+  // Also bound cursor traversal in case Meta repeats data with changing cursors.
+  for (let pages = 0; pages < 100 && results.length < 50; pages++) {
+    let limit = Math.min(pageSize, 50 - results.length);
+    let page: Page;
+    let unavailable = false;
+    while (true) {
+      try {
+        page = await readPage(limit, fields);
+        break;
+      } catch (error) {
+        if (!(error instanceof MetaApiError) || error.code !== 1) throw error;
+        if (limit > 1) {
+          limit = Math.max(1, Math.floor(limit / 2));
+          continue;
+        }
+        // This exact cursor succeeds with id,updated_time in the reported case.
+        // If even that fails, propagate the failure; do not skip unknown data.
+        page = await readPage(1, "id,updated_time");
+        unavailable = true;
+        console.warn("[Conversations] Detail expansion unavailable", {
+          code: error.code,
+          subcode: error.subcode,
+          trace: error.fbTraceId,
+        });
+        break;
+      }
+    }
+
+    const rows = page.data ?? [];
+    for (const row of rows) {
+      if (seenIds.has(row.id)) continue;
+      seenIds.add(row.id);
+      results.push(unavailable ? { ...row, detailsUnavailable: true } : row);
+      if (results.length === 50) return results;
+    }
+    if (!page.paging?.next || rows.length === 0) return results;
+    const nextAfter = page.paging.cursors?.after;
+    if (!nextAfter || seenCursors.has(nextAfter)) {
+      throw new Error("Instagram conversation pagination did not advance");
+    }
+    seenCursors.add(nextAfter);
+    after = nextAfter;
+    // Stay small around failures; grow back towards the normal page size after
+    // successful expansions. Consecutive bad entries cost two reads each.
+    pageSize = unavailable ? 1 : Math.min(50, limit * 2);
+  }
+  throw new Error("Instagram conversation pagination exceeded its safety limit");
 }
 
 /**
