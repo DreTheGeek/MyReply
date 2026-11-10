@@ -2,6 +2,7 @@ import type { ChannelPlatform as StoredPlatform } from "@/app/generated/prisma/c
 import type { ChannelAccountRow, ChannelAdapter, ChannelContext } from "./adapter";
 import { facebookAdapter } from "./facebook/adapter";
 import { instagramAdapter } from "./instagram/adapter";
+import { instrumentAdapter, type SendSource } from "./instrument";
 import type { ChannelPlatform } from "./platforms";
 
 /**
@@ -62,8 +63,26 @@ export interface OpenChannel {
  * failure rather than a send failure.
  */
 export async function openChannel(
-  account: ChannelAccountRow & { platform: ChannelPlatform }
+  account: ChannelAccountRow & {
+    platform: ChannelPlatform;
+    id?: string;
+    workspaceId?: string;
+  },
+  options: { source?: SendSource } = {}
 ): Promise<OpenChannel> {
   const adapter = getChannelAdapter(account.platform);
-  return { adapter, context: await adapter.openContext(account) };
+  const context = await adapter.openContext(account);
+  // A stored row knows whose it is, so its sends are metered and reported.
+  // A bare row (a credential check, a test) is handed the adapter untouched.
+  if (account.id && account.workspaceId) {
+    return {
+      adapter: instrumentAdapter(adapter, {
+        workspaceId: account.workspaceId,
+        accountId: account.id,
+        source: options.source ?? "automation",
+      }),
+      context,
+    };
+  }
+  return { adapter, context };
 }

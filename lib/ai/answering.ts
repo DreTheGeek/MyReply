@@ -52,6 +52,7 @@ import {
   type RetrievedChunk,
 } from "@/lib/ai/retrieval";
 import { prisma } from "@/lib/db/client";
+import { recordUsage } from "@/lib/usage/meter";
 import { getRedisConnection } from "@/lib/queue/client";
 import type { McpTool } from "@/lib/mcp/tools";
 
@@ -681,6 +682,32 @@ async function recordAnswer(record: RecordAnswerInput): Promise<string> {
     },
     select: { id: true },
   });
+
+  // A model was called, so the reply is metered with what the provider said
+  // it cost, against the platform the conversation is on.
+  if (record.model && record.input.instagramAccountId) {
+    try {
+      const account = await prisma.instagramAccount.findFirst({
+        where: { id: record.input.instagramAccountId, workspaceId: record.input.workspaceId },
+        select: { platform: true },
+      });
+      if (account) {
+        await recordUsage({
+          workspaceId: record.input.workspaceId,
+          platform: account.platform,
+          kind: "AI_REPLY",
+          costMicros: record.usage?.costMicros ?? 0,
+        });
+      }
+    } catch (error) {
+      // The answer is saved; only its meter line is missing, and that is said.
+      console.error("[answering] Could not meter a reply:", {
+        workspaceId: record.input.workspaceId,
+        costMicros: record.usage?.costMicros ?? 0,
+        reason: error instanceof Error ? error.name : "unknown",
+      });
+    }
+  }
   return row.id;
 }
 

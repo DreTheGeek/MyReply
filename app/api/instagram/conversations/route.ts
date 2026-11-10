@@ -236,7 +236,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const channel = await openChannel(account);
+    const channel = await openChannel(account, { source: "inbox" });
     const result = await channel.adapter.messaging.send(channel.context, {
       to: { kind: "user", userId: recipientId },
       content: { kind: "text", text },

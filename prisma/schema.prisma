@@ -186,6 +186,7 @@ model Workspace {
   assistantAnswers  AssistantAnswer[]
   outboundMessages  OutboundMessage[]
   aiCredential      WorkspaceAiCredential?
+  usageDays         UsageDaily[]
 
   oauthAuthorizationCodes OAuthAuthorizationCode[]
   oauthTokens             OAuthToken[]
@@ -1322,4 +1323,38 @@ model IdempotencyRecord {
 
   @@unique([credentialId, key])
   @@index([createdAt])
+}
+
+enum UsageKind {
+  /// A message the engine sent: a private reply, a DM, a button reveal, an
+  /// inbox reply or one sent through the API.
+  MESSAGE_SENT
+  /// A public reply posted under a comment.
+  PUBLIC_REPLY
+  /// A reply a model wrote, with what the provider charged for it.
+  AI_REPLY
+}
+
+/// What a workspace used, per day, platform and kind. The counter a partner
+/// bills its own users from. Kept as running daily totals rather than one row
+/// per message, so it outlives the 90 day log retention at a few rows a day.
+/// Money is in millionths of a dollar, as integers.
+model UsageDaily {
+  id                String          @id @default(cuid())
+  workspaceId       String
+  day               DateTime        @db.Date
+  platform          ChannelPlatform
+  kind              UsageKind
+  count             Int             @default(0)
+  /// What the model provider charged, for AI_REPLY.
+  costMicros        BigInt          @default(0)
+  /// What the platform charges per message, where it does (WhatsApp). Zero
+  /// for Instagram and Facebook, which charge nothing.
+  platformFeeMicros BigInt          @default(0)
+  updatedAt         DateTime        @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, day, platform, kind])
+  @@index([workspaceId, day])
 }
