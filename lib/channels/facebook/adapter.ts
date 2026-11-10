@@ -1,6 +1,7 @@
 import * as fb from "@/lib/meta/facebook";
 import { decryptToken } from "@/lib/meta/oauth";
 import { verifyWebhookSignature } from "@/lib/meta/webhook";
+import { parseSignedRequest } from "@/lib/meta/signed-request";
 import { MetaApiError, PermissionError, RateLimitError, TokenExpiredError } from "@/lib/meta/client";
 import type { ChannelAdapter, ChannelContext } from "../adapter";
 import { getChannelCapabilities } from "../capabilities";
@@ -151,7 +152,10 @@ export const facebookAdapter: ChannelAdapter = {
     },
     async completeConnection({ code, redirectUri }) {
       const userToken = await fb.exchangeFacebookCode(code, redirectUri);
-      const pages = await fb.listManagedPages(userToken);
+      const [pages, authorizedBy] = await Promise.all([
+        fb.listManagedPages(userToken),
+        fb.getFacebookUserId(userToken),
+      ]);
       return pages
         // A Page the person cannot message as is no use to connect.
         .filter((page) => !page.tasks || page.tasks.includes("MESSAGING") || page.tasks.includes("MODERATE"))
@@ -161,6 +165,7 @@ export const facebookAdapter: ChannelAdapter = {
           name: page.name,
           accessToken: page.access_token,
           expiresAt: null,
+          authorizedByExternalId: authorizedBy,
         }));
     },
     async refreshToken(context) {
@@ -232,6 +237,13 @@ export const facebookAdapter: ChannelAdapter = {
   moderation: {
     async hideComment(context, commentId, hidden) {
       await fb.setPageCommentHidden(context.accessToken, commentId, hidden);
+    },
+  },
+
+  compliance: {
+    verifyCallback(body) {
+      const parsed = parseSignedRequest(body.get("signed_request"), process.env.FACEBOOK_APP_SECRET);
+      return parsed ? { userId: parsed.userId } : null;
     },
   },
 

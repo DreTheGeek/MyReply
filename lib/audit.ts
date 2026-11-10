@@ -39,6 +39,10 @@ export const AUDIT_ACTIONS = [
   // Not destructive, but the one action that takes the workspace's data off
   // the platform, so it leaves a trace saying who and how much.
   "data.exported",
+  // Sent by the platform, not done by a member: the person who connected an
+  // account removed the app, or asked for their data to be deleted.
+  "channel.deauthorized",
+  "channel.data_deleted",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -54,6 +58,8 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   "ai_credential.deleted": "AI key removed",
   "api_key.revoked": "API key revoked",
   "data.exported": "Data exported",
+  "channel.deauthorized": "App removed on the platform, account paused",
+  "channel.data_deleted": "Data deleted at the platform's request",
 };
 
 export interface AuditEntry {

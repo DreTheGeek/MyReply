@@ -58,6 +58,12 @@ export interface ConnectedAccountGrant {
   /** Plaintext. The caller encrypts it before it touches the database. */
   accessToken: string;
   expiresAt: Date | null;
+  /**
+   * The platform's app-scoped id for the person who granted the connection,
+   * when it says. It is how a later "this person removed the app" callback is
+   * matched back to the accounts they connected.
+   */
+  authorizedByExternalId?: string | null;
 }
 
 export interface ChannelAuth {
@@ -153,6 +159,19 @@ export interface ChannelInbox {
   messages(context: ChannelContext, conversationId: string): Promise<ChannelMessage[]>;
 }
 
+/**
+ * The platform's own privacy callbacks: the person removed the app, or asked
+ * for their data to be deleted.
+ */
+export interface ChannelCompliance {
+  /**
+   * The person a callback is about, read from the request the platform
+   * signed. Null for anything that does not verify, so a forged request never
+   * reaches the code that pauses or deletes accounts.
+   */
+  verifyCallback(body: URLSearchParams): { userId: string } | null;
+}
+
 export interface ChannelModeration {
   /** Hide a comment from everyone but its author, or show it again. */
   hideComment(context: ChannelContext, commentId: string, hidden: boolean): Promise<void>;
@@ -204,5 +223,7 @@ export interface ChannelAdapter {
   profileSettings?: ChannelProfileSettings;
   /** Present when capabilities.hideComment is true. */
   moderation?: ChannelModeration;
+  /** Present for platforms that send deauthorize and data deletion callbacks. */
+  compliance?: ChannelCompliance;
   errors: ChannelErrorRules;
 }

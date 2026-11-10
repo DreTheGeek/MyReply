@@ -75,6 +75,22 @@ describe("storeConnectedAccounts", () => {
     expect(result).toEqual({ connected: 0, refused: "already_connected" });
   });
 
+  it("records who granted the connection, and keeps it when a reconnect cannot say", async () => {
+    await storeConnectedAccounts({
+      adapter,
+      grants: [{ ...grant("p1"), authorizedByExternalId: "asid_1" }],
+      workspaceId: "ws_1",
+    });
+    expect(mockPrisma.instagramAccount.create.mock.calls[0][0].data.authorizedByExternalId).toBe("asid_1");
+
+    mockPrisma.instagramAccount.findUnique.mockResolvedValue({ id: "row_1" });
+    mockPrisma.instagramAccount.updateMany.mockResolvedValue({ count: 1 });
+    await storeConnectedAccounts({ adapter, grants: [grant("p1")], workspaceId: "ws_1" });
+    expect(mockPrisma.instagramAccount.updateMany.mock.calls[0][0].data).not.toHaveProperty(
+      "authorizedByExternalId"
+    );
+  });
+
   it("still connects when the event subscription fails, recorded as not subscribed", async () => {
     subscribe.mockRejectedValue(new Error("boom"));
     await storeConnectedAccounts({ adapter, grants: [grant("p1")], workspaceId: "ws_1" });

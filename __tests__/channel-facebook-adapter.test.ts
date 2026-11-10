@@ -12,6 +12,7 @@ const fb = vi.hoisted(() => ({
   setPageCommentHidden: vi.fn(),
   exchangeFacebookCode: vi.fn(),
   listManagedPages: vi.fn(),
+  getFacebookUserId: vi.fn(),
   subscribePageToWebhooks: vi.fn(),
   getPageProfile: vi.fn(),
   getRecentPostComments: vi.fn(),
@@ -176,14 +177,24 @@ describe("webhook events", () => {
 describe("connect", () => {
   it("returns a grant per Page the person can message from, with no expiry", async () => {
     fb.exchangeFacebookCode.mockResolvedValue("user_token");
+    fb.getFacebookUserId.mockResolvedValue("asid_42");
     fb.listManagedPages.mockResolvedValue([
       { id: "p1", name: "Lash Studio", access_token: "pt1", tasks: ["MESSAGING", "MODERATE"] },
       { id: "p2", name: "Analytics only", access_token: "pt2", tasks: ["ANALYZE"] },
     ]);
     const grants = await facebookAdapter.auth.completeConnection({ code: "c", redirectUri: "https://x/cb" });
     expect(grants).toEqual([
-      { externalId: "p1", username: "Lash Studio", name: "Lash Studio", accessToken: "pt1", expiresAt: null },
+      {
+        externalId: "p1",
+        username: "Lash Studio",
+        name: "Lash Studio",
+        accessToken: "pt1",
+        expiresAt: null,
+        // Who granted it, so Facebook's deauthorize callback can find it.
+        authorizedByExternalId: "asid_42",
+      },
     ]);
+    expect(fb.getFacebookUserId).toHaveBeenCalledWith("user_token");
   });
 
   it("opens a context from a stored Page row", async () => {

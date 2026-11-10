@@ -65,6 +65,11 @@ export async function storeConnectedAccounts({
       accessToken: encryptToken(grant.accessToken),
       tokenExpiresAt: grant.expiresAt,
       webhookSubscribed,
+      // Only overwritten when the platform said, so a reconnect that could
+      // not read it keeps the id recorded last time.
+      ...(grant.authorizedByExternalId
+        ? { authorizedByExternalId: grant.authorizedByExternalId }
+        : {}),
     };
 
     const existing = await prisma.instagramAccount.findUnique({

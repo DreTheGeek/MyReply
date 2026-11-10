@@ -10,6 +10,7 @@ import {
   getAuthorizationUrl,
 } from "@/lib/meta/oauth";
 import { verifyWebhookSignature } from "@/lib/meta/webhook";
+import { parseSignedRequest } from "@/lib/meta/signed-request";
 import type {
   ChannelAdapter,
   ChannelContext,
@@ -305,7 +306,7 @@ export const instagramAdapter: ChannelAdapter = {
       return getAuthorizationUrl(redirectUri, state);
     },
     async completeConnection({ code, redirectUri }) {
-      const { accessToken: shortLived } = await exchangeCodeForToken(
+      const { accessToken: shortLived, userId: authorizedBy } = await exchangeCodeForToken(
         code,
         redirectUri
       );
@@ -318,6 +319,9 @@ export const instagramAdapter: ChannelAdapter = {
           name: profile.name,
           accessToken,
           expiresAt: new Date(Date.now() + expiresIn * 1000),
+          // The id the token exchange names, which is the one Instagram's
+          // deauthorize and data deletion callbacks carry.
+          authorizedByExternalId: authorizedBy || null,
         },
       ];
     },
@@ -385,6 +389,14 @@ export const instagramAdapter: ChannelAdapter = {
   moderation: {
     async hideComment(context, commentId, hidden) {
       await meta.setCommentHidden(context.accessToken, commentId, hidden);
+    },
+  },
+
+  compliance: {
+    // Instagram business login is its own app, signed with its own secret.
+    verifyCallback(body) {
+      const parsed = parseSignedRequest(body.get("signed_request"), process.env.INSTAGRAM_APP_SECRET);
+      return parsed ? { userId: parsed.userId } : null;
     },
   },
 

@@ -94,6 +94,28 @@ export function getFacebookAuthorizationUrl(redirectUri: string, state: string):
 }
 
 /** Trade the code for a long-lived user token, which is what Page tokens derive from. */
+/**
+ * The app-scoped id of the person a user token belongs to: the id Facebook
+ * names in its deauthorize and data deletion callbacks. Null when it cannot be
+ * read, which never fails a connect: the callbacks then fall back to the Page.
+ */
+export async function getFacebookUserId(userToken: string): Promise<string | null> {
+  try {
+    const me = await handleResponse<{ id?: unknown }>(
+      await fetch(`${facebookGraphBase()}/me?fields=id`, {
+        headers: { Authorization: `Bearer ${userToken}` },
+      })
+    );
+    return typeof me.id === "string" && me.id ? me.id : null;
+  } catch (error) {
+    console.warn(
+      "[Facebook] Could not read the connecting person's id:",
+      error instanceof Error ? error.message : "Unknown error"
+    );
+    return null;
+  }
+}
+
 export async function exchangeFacebookCode(
   code: string,
   redirectUri: string

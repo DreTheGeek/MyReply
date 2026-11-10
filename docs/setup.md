@@ -159,6 +159,7 @@ The same Meta app can connect Facebook Pages for comment-to-DM and the Messenger
 1. In Facebook Login settings, add the redirect URI `https://YOUR-DOMAIN/api/channels/facebook/callback`.
 2. In the app's Webhooks settings, choose the **Page** object, use the same callback URL and verify token as Instagram (`https://YOUR-DOMAIN/api/webhook`), and subscribe to `feed`, `messages`, `messaging_postbacks`, `message_reads`, `message_echoes`, `message_edits`, `message_reactions` and `messaging_referrals`. Each connected Page is also subscribed automatically when it connects.
 3. Set `FACEBOOK_APP_ID`. `FACEBOOK_APP_SECRET` is already set for Instagram.
+4. In Facebook Login for Business settings, set the Deauthorize callback URL to `https://YOUR-DOMAIN/api/channels/facebook/deauthorize`, and in the app's Basic settings set the Data deletion request URL to `https://YOUR-DOMAIN/api/channels/facebook/data-deletion`.
 
 Then use **Connect a Facebook Page** in Settings. Facebook asks which Pages to share; every Page you choose, and can message from, is connected. The permissions and why each is needed are in [docs/review/meta.md](review/meta.md).
 
@@ -188,6 +189,15 @@ https://your-app.vercel.app/api/instagram/callback
 ```
 
 No trailing slash. If this is missing or wrong, connecting an account fails with a redirect_uri mismatch. You can register more than one, which is useful if you change domains later; keep the old and new both listed.
+
+On the same Business login settings page, set the two privacy callbacks:
+
+```
+Deauthorize callback URL:   https://your-app.vercel.app/api/channels/instagram/deauthorize
+Data deletion request URL:  https://your-app.vercel.app/api/channels/instagram/data-deletion
+```
+
+Meta calls the first when someone removes the app from their account: the stored token is erased and that account's campaigns are paused. It calls the second when they ask for their data to be deleted: every account they connected is deleted with everything under it, and Meta shows them a confirmation code that resolves on `/data-deletion/status`. Both requests are signed with the app secret and anything unsigned is refused. Instagram signs with `INSTAGRAM_APP_SECRET`, Facebook with `FACEBOOK_APP_SECRET`.
 
 You do not need the "Embed URL" that Meta shows here. OpenReply builds its own login URL. Users connect by opening your app, going to Settings, and clicking Connect Instagram.
 

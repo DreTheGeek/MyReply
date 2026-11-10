@@ -330,6 +330,10 @@ model InstagramAccount {
   accessToken       String
   tokenExpiresAt    DateTime?
   webhookSubscribed Boolean   @default(false)
+  /// The platform's app-scoped id for the person who granted this connection.
+  /// It is the id Meta names when that person removes the app or asks for
+  /// their data to be deleted. Null on rows connected before it was recorded.
+  authorizedByExternalId String?
   connectedAt       DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
@@ -343,6 +347,7 @@ model InstagramAccount {
   outboundMessages  OutboundMessage[]
 
   @@index([workspaceId])
+  @@index([platform, authorizedByExternalId])
 }
 
 /// Daily follower total for one account. Instagram only retains ~30 days of
@@ -1201,4 +1206,21 @@ model ContactConsent {
 
   @@unique([contactId, sourceMessageId])
   @@index([workspaceId, consentedAt])
+}
+
+/// A data deletion request a platform sent on a person's behalf, after they
+/// removed the app. The confirmation code is what the platform shows them, and
+/// the status page looks it up. The person's id is stored only as a hash: the
+/// point of the request is that we stop holding it. Kept for a year.
+model DataDeletionRequest {
+  id               String          @id @default(cuid())
+  confirmationCode String          @unique
+  platform         ChannelPlatform
+  /// SHA-256 of the platform's app-scoped user id.
+  userIdHash       String
+  accountsDeleted  Int             @default(0)
+  requestedAt      DateTime        @default(now())
+  completedAt      DateTime?
+
+  @@index([requestedAt])
 }

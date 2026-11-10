@@ -85,6 +85,9 @@ export async function GET(request: NextRequest) {
       accessToken: encryptedToken,
       tokenExpiresAt,
       webhookSubscribed,
+      ...(grant.authorizedByExternalId
+        ? { authorizedByExternalId: grant.authorizedByExternalId }
+        : {}),
     };
     const existing = await prisma.instagramAccount.findUnique({ where: { instagramId } });
     if (existing) {
