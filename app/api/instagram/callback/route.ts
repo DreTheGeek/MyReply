@@ -98,9 +98,11 @@ export async function GET(request: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("[Instagram Callback] Error:", err);
-    // The message is the only diagnostic a self-hoster gets for a failed
-    // connect, so persist it alongside the other operational events rather
-    // than leaving it in server logs they may not be able to reach.
+    // The reason is kept server side: in the log above and on the workspace's
+    // operational event, where an operator can read it. It used to ride on the
+    // redirect URL and be printed on the settings page, which put internal
+    // error text (token exchange responses, Graph errors) in front of whoever
+    // was connecting, and into their browser history.
     await prisma.operationalEvent
       .create({
         data: {
@@ -113,10 +115,6 @@ export async function GET(request: NextRequest) {
       })
       .catch(() => {});
 
-    return NextResponse.redirect(
-      `${baseUrl}/settings?instagram=failed&reason=${encodeURIComponent(
-        message.slice(0, 200)
-      )}`
-    );
+    return NextResponse.redirect(`${baseUrl}/settings?instagram=failed`);
   }
 }

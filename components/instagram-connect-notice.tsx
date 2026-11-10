@@ -84,18 +84,11 @@ export function InstagramConnectNotice() {
   }
 
   if (status === "failed") {
-    const reason = searchParams.get("reason");
-
     return (
       <Notice tone="error" title={t("Instagram connection failed")}>
         <p>
           {t("Instagram accepted the login but the connection could not be completed. This is usually a mismatched redirect URI or an app that is missing the required permissions.")}
         </p>
-        {reason && (
-          <p className="mt-2 font-mono text-xs break-words opacity-80">
-            {reason}
-          </p>
-        )}
       </Notice>
     );
   }
