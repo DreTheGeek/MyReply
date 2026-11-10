@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { BASE_SECURITY_HEADERS, SECURITY_HEADERS } from "./lib/security/csp";
 
 /**
  * Security headers.
@@ -26,66 +27,31 @@ import type { NextConfig } from "next";
  * <script src> pointing at an attacker's origin is refused, as are plugins,
  * a <base> takeover, and posting our forms to a third party. Framing is
  * denied outright, which is the clickjacking defence the dashboard's
- * destructive controls and the public /reports pages both needed.
+ * destructive controls and the public /reports pages both needed. The one
+ * exception is /hosted, the pages a partner app embeds, which only that
+ * partner's own origins may frame.
  *
  * ON img-src AND media-src ALLOWING ANY https ORIGIN. Post thumbnails and reel
  * videos come from Instagram's CDN on signed URLs that expire and are never
  * stored, so there is no fixed host to list. Narrowing this would blank every
  * campaign thumbnail the first time Meta moved a bucket.
  */
-const isDev = process.env.NODE_ENV === "development";
-
-const csp = [
-  "default-src 'self'",
-  // 'unsafe-eval' is a development-only concession to fast refresh and the
-  // error overlay. It is never sent in production.
-  `script-src 'self' 'unsafe-inline' https://va.vercel-scripts.com${
-    isDev ? " 'unsafe-eval'" : ""
-  }`,
-  // next/font emits an inline <style> and React sets style attributes, so
-  // inline style cannot be removed without breaking first paint. Style is not
-  // a script execution sink, which is why this trade is acceptable here.
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https:",
-  "media-src 'self' blob: https:",
-  "font-src 'self' data:",
-  "connect-src 'self' https://va.vercel-scripts.com",
-  "worker-src 'self' blob:",
-  "manifest-src 'self'",
-  "object-src 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-  // The modern replacement for X-Frame-Options. Both are sent: the header for
-  // anything that still only understands it, this for everything else.
-  "frame-ancestors 'none'",
-  "upgrade-insecure-requests",
-].join("; ");
-
-const securityHeaders = [
-  { key: "Content-Security-Policy", value: csp },
-  { key: "X-Frame-Options", value: "DENY" },
-  { key: "X-Content-Type-Options", value: "nosniff" },
-  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  {
-    key: "Permissions-Policy",
-    value: "camera=(), microphone=(), geolocation=(), interest-cohort=()",
-  },
-  {
-    key: "Strict-Transport-Security",
-    value: "max-age=63072000; includeSubDomains; preload",
-  },
-  // Keeps a same-origin window handle out of anything we open, and stops a
-  // cross-origin document from measuring this one.
-  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
-];
-
+// The policy itself is built in lib/security/csp.ts, so proxy.ts can give a
+// hosted page the same policy with the partner's origins as frame-ancestors.
 const nextConfig: NextConfig = {
   reactCompiler: true,
   turbopack: {
     root: process.cwd(),
   },
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [
+      // Every route but the hosted pages: framing denied outright.
+      { source: "/:path((?!hosted/).*)", headers: SECURITY_HEADERS },
+      // The hosted pages a partner may frame. proxy.ts sets their CSP, with the
+      // partner's own origins as frame-ancestors, on every request to them.
+      // X-Frame-Options is left off because it cannot name an allowed origin.
+      { source: "/hosted/:path*", headers: BASE_SECURITY_HEADERS },
+    ];
   },
 };
 

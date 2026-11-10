@@ -1,4 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { verifyHostedToken, type HostedLinkKind } from "@/lib/partners/links";
+import { buildCsp, frameAncestorsFor } from "@/lib/security/csp";
 
 /**
  * Every signed-in surface. The dashboard layout is the real gate, since it
@@ -43,8 +45,72 @@ function hasSessionCookie(request: NextRequest): boolean {
   return SESSION_COOKIES.some((name) => request.cookies.has(name));
 }
 
+/**
+ * Whether this request came in on a partner's own domain rather than ours.
+ *
+ * Only decided when NEXTAUTH_URL is set, which it always is in production:
+ * without it there is no way to tell our host from anyone else's, and guessing
+ * wrong would lock the dashboard out. Vercel's preview hosts and local
+ * development are always ours.
+ */
+export function isPartnerHost(host: string | null, baseUrl: string | undefined): boolean {
+  if (!host || !baseUrl) return false;
+  let own: string;
+  try {
+    own = new URL(baseUrl).host.toLowerCase();
+  } catch {
+    return false;
+  }
+  const requested = host.toLowerCase();
+  if (requested === own) return false;
+  if (requested.endsWith(".vercel.app")) return false;
+  if (/^(localhost|127\.0\.0\.1)(:\d+)?$/.test(requested)) return false;
+  return true;
+}
+
+/** What a partner's domain may serve: its hosted pages and what they need. */
+const PARTNER_HOST_PREFIXES = ["/hosted/", "/api/hosted/", "/_next/"];
+
+const HOSTED_PAGE = /^\/hosted\/(connect|inbox)\/([^/]+)\/?$/;
+
+/**
+ * The CSP for a hosted page: the usual policy, with frame-ancestors set to the
+ * origins the partner registered, as signed into the link when it was minted.
+ * Anything that does not verify may be framed by nobody.
+ */
+export function hostedPageCsp(pathname: string): string {
+  const match = HOSTED_PAGE.exec(pathname);
+  if (!match) return buildCsp("'none'");
+  let token: string;
+  try {
+    token = decodeURIComponent(match[2]);
+  } catch {
+    return buildCsp("'none'");
+  }
+  const claims = verifyHostedToken(token, match[1] as HostedLinkKind);
+  return buildCsp(claims ? frameAncestorsFor(claims.fa) : "'none'");
+}
+
 export function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+
+  // A partner's domain is theirs: it serves the hosted pages and nothing of
+  // ours, so the dashboard and sign-in never appear under their name.
+  if (isPartnerHost(request.headers.get("host"), process.env.NEXTAUTH_URL)) {
+    if (!PARTNER_HOST_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
+      return new NextResponse("Not found", {
+        status: 404,
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      });
+    }
+  }
+
+  if (pathname.startsWith("/hosted/")) {
+    const response = NextResponse.next();
+    response.headers.set("Content-Security-Policy", hostedPageCsp(pathname));
+    return response;
+  }
+
   const isProtected = PROTECTED_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
   );
@@ -102,18 +168,9 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: [
-    "/dashboard/:path*",
-    "/overview/:path*",
-    "/campaigns/:path*",
-    "/contacts/:path*",
-    "/inbox/:path*",
-    "/answers/:path*",
-    "/logs/:path*",
-    "/settings/:path*",
-    "/diagnostics/:path*",
-    "/onboarding/:path*",
-    "/automations/:path*",
-    "/login",
-  ],
+  // Every route except static assets: a partner's domain has to be held to its
+  // hosted pages wherever the request lands, and the hosted pages need their
+  // framing header. The sign-in redirects below still only act on their own
+  // prefixes.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon-|apple-touch-icon).*)"],
 };
