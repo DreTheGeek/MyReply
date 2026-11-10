@@ -18,6 +18,7 @@ import {
   type ProcessFollowUpJob,
 } from "./client";
 import { prisma } from "@/lib/db/client";
+import { emitEvent } from "@/lib/webhooks/events";
 import { canMessageContact } from "@/lib/messaging/opt-out";
 import { checkQuietHours } from "@/lib/messaging/quiet-hours";
 import type { ChannelErrorRules } from "@/lib/channels/adapter";
@@ -391,6 +392,18 @@ async function recordCapturedDetail(job: Job<ProcessMessageJob>): Promise<boolea
       data: detail.kind === "email" ? { email: detail.value } : { phone: detail.value },
     }),
   ]);
+  await emitEvent({
+    workspaceId: account.workspaceId,
+    type: "contact.captured",
+    dedupeKey: `${contact.id}:${messageId}`,
+    data: {
+      account: { id: account.id },
+      contact: { id: contact.id, externalId: senderId },
+      detail: { kind: detail.kind, value: detail.value },
+      consent: { text: prompt.consentText, at: consentedAt.toISOString() },
+      campaignId: prompt.automationId,
+    },
+  });
   console.log("[DM Worker] Contact detail recorded with consent", {
     kind: detail.kind,
     automationId: prompt.automationId,
@@ -573,7 +586,44 @@ function connectionScope(data: DmQueueJob) {
   return data.accountConnectionId ? { instagramAccountId: data.accountConnectionId } : {};
 }
 
+/**
+ * Tell any listening partner app a comment arrived, whether or not a campaign
+ * answers it. Here rather than in the webhook so a comment the polling sweep
+ * found is announced too; the comment id makes a repeat the same event.
+ */
+async function announceComment(job: Job<ProcessCommentJob>): Promise<void> {
+  try {
+    const account = await prisma.instagramAccount.findFirst({
+      where: {
+        instagramId: job.data.instagramAccountId,
+        ...(job.data.accountConnectionId ? { id: job.data.accountConnectionId } : {}),
+      },
+      select: { id: true, workspaceId: true, platform: true },
+    });
+    if (!account) return;
+    await emitEvent({
+      workspaceId: account.workspaceId,
+      type: "comment.received",
+      dedupeKey: `${account.id}:${job.data.commentId}`,
+      data: {
+        account: { id: account.id, platform: account.platform },
+        comment: {
+          id: job.data.commentId,
+          text: job.data.commentText,
+          postId: job.data.originalMediaId ?? job.data.mediaId,
+          live: job.data.source === "LIVE",
+          createdAt: job.data.commentCreatedAt ?? null,
+        },
+        author: { id: job.data.commenterId, username: job.data.commenterName ?? null },
+      },
+    });
+  } catch (error) {
+    console.error("[DM Worker] Could not announce a comment:", formatError(error));
+  }
+}
+
 async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
+  if (!job.data.requeueAttempt) await announceComment(job);
   const {
     instagramAccountId,
     commentId,

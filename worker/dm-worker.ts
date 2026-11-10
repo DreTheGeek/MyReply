@@ -1,5 +1,6 @@
 import { validateWorkerEnv } from "@/lib/env";
 import { createDMWorker } from "@/lib/queue/dm-worker";
+import { createWebhookWorker } from "@/lib/webhooks/deliver";
 import { recordWorkerHeartbeat } from "@/lib/ops/worker-health";
 import { reconcileComments } from "@/lib/polling/comment-reconciler";
 import { attachPendingNextReels } from "@/lib/automation/attach-next-reel";
@@ -23,6 +24,9 @@ try {
 }
 
 const worker = createDMWorker();
+// Deliveries to partner apps, on their own queue so a slow endpoint never
+// holds up a DM.
+const webhookWorker = createWebhookWorker();
 const startedAt = new Date().toISOString();
 const HEARTBEAT_INTERVAL_MS = 30_000;
 // Polling safety net for comments that webhooks miss. Runs in the worker because
@@ -70,7 +74,7 @@ async function shutdown(signal: string) {
   console.log(`[DM Worker] ${signal} received, closing worker`);
   clearInterval(heartbeatTimer);
   clearInterval(pollTimer);
-  await worker.close();
+  await Promise.all([worker.close(), webhookWorker.close()]);
   process.exit(0);
 }
 
@@ -94,8 +98,7 @@ process.on("uncaughtException", (error) => {
   // be restarted.
   clearInterval(heartbeatTimer);
   clearInterval(pollTimer);
-  void worker
-    .close()
+  void Promise.all([worker.close(), webhookWorker.close()])
     .catch(() => {})
     .finally(() => process.exit(1));
 });

@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "crypto";
+import { announceDisconnected } from "@/lib/webhooks/account-events";
 import { recordAuditEvent } from "@/lib/audit";
 import { prisma } from "@/lib/db/client";
 import type { ChannelPlatform } from "./platforms";
@@ -77,6 +78,7 @@ export async function deauthorizeChannelUser(
     }),
   ]);
   await auditPerWorkspace(accounts, "channel.deauthorized", platform);
+  await announceDisconnected(accounts, platform, "removed_on_platform");
   return { accounts: accounts.length };
 }
 
@@ -123,6 +125,7 @@ export async function deleteChannelUserData(
     data: { accountsDeleted: accounts.length, completedAt: new Date() },
   });
   await auditPerWorkspace(accounts, "channel.data_deleted", platform);
+  await announceDisconnected(accounts, platform, "data_deleted");
   return { confirmationCode, accounts: accounts.length };
 }
 

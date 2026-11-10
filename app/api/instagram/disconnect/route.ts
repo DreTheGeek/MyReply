@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { recordAuditEvent } from "@/lib/audit";
 import { prisma } from "@/lib/db/client";
+import { announceDisconnected } from "@/lib/webhooks/account-events";
 import {
   canManageWorkspace,
   getCurrentWorkspaceContext,
@@ -56,6 +57,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Read before the delete, so the event can still say which platform it was.
+  const account = await prisma.instagramAccount.findFirst({
+    where: { id: parsed.data.instagramAccountId, workspaceId: context.workspaceId },
+    select: { platform: true },
+  });
+
   // Both keys in the same predicate: the id says which account, the workspace
   // id says it has to be one of theirs.
   const result = await prisma.instagramAccount.deleteMany({
@@ -80,6 +87,13 @@ export async function POST(request: NextRequest) {
     actorUserId: context.userId,
     targetId: parsed.data.instagramAccountId,
   });
+  if (account) {
+    await announceDisconnected(
+      [{ id: parsed.data.instagramAccountId, workspaceId: context.workspaceId }],
+      account.platform,
+      "disconnected"
+    );
+  }
 
   return NextResponse.json({ success: true });
 }

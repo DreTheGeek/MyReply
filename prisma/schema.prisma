@@ -187,6 +187,7 @@ model Workspace {
   outboundMessages  OutboundMessage[]
   aiCredential      WorkspaceAiCredential?
   usageDays         UsageDaily[]
+  webhookEndpoints  WebhookEndpoint[]
 
   oauthAuthorizationCodes OAuthAuthorizationCode[]
   oauthTokens             OAuthToken[]
@@ -230,8 +231,9 @@ model Partner {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
-  keys       PartnerApiKey[]
-  workspaces Workspace[]
+  keys             PartnerApiKey[]
+  workspaces       Workspace[]
+  webhookEndpoints WebhookEndpoint[]
 }
 
 /// A partner's machine credential. Hashed at rest exactly like an API key.
@@ -1357,4 +1359,67 @@ model UsageDaily {
 
   @@unique([workspaceId, day, platform, kind])
   @@index([workspaceId, day])
+}
+
+enum WebhookDeliveryStatus {
+  PENDING
+  DELIVERED
+  FAILED
+}
+
+/// Where to send events. Belongs to one workspace, or to a partner, in which
+/// case it hears every one of the partner's workspaces. The signing secret is
+/// AES-256-GCM ciphertext under ENCRYPTION_KEY: it has to be read back to sign
+/// each delivery, so it cannot be a hash, and it is shown in the clear once,
+/// when the endpoint is made.
+model WebhookEndpoint {
+  id                  String    @id @default(cuid())
+  workspaceId         String?
+  partnerId           String?
+  url                 String
+  description         String?
+  /// Event types from lib/webhooks/events.ts.
+  events              String[]
+  secretEncrypted     String
+  /// The first characters of the secret, so the owner can tell which one this is.
+  secretHint          String
+  /// Deliveries that ran out of retries in a row. Reset by any success.
+  consecutiveFailures Int       @default(0)
+  disabledAt          DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  workspace  Workspace?        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  partner    Partner?          @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@index([workspaceId])
+  @@index([partnerId])
+}
+
+/// One event on its way to one endpoint, and what happened each time we tried.
+/// Unique per endpoint and event, so an event emitted twice (a redelivered
+/// webhook, a retried job) is delivered once. Kept 30 days.
+model WebhookDelivery {
+  id             String                @id
+  endpointId     String
+  eventId        String
+  eventType      String
+  workspaceId    String
+  /// The exact body that is signed and sent.
+  payload        String
+  status         WebhookDeliveryStatus @default(PENDING)
+  attempts       Int                   @default(0)
+  lastStatusCode Int?
+  /// A short plain reason such as "HTTP 500" or "timed out". Never a body.
+  lastError      String?
+  lastAttemptAt  DateTime?
+  deliveredAt    DateTime?
+  createdAt      DateTime              @default(now())
+
+  endpoint WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@unique([endpointId, eventId])
+  @@index([endpointId, createdAt])
+  @@index([createdAt])
 }

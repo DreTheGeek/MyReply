@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db/client";
 import { canConnectInstagramAccount } from "@/lib/instagram-accounts";
 import { encryptToken } from "@/lib/security/token-crypto";
+import { announceConnected } from "@/lib/webhooks/account-events";
 import type { ChannelAdapter, ConnectedAccountGrant } from "./adapter";
 
 export type ConnectRefusal = "already_connected" | "plan_limit" | "none_granted";
@@ -76,6 +77,7 @@ export async function storeConnectedAccounts({
       where: { instagramId: grant.externalId },
       select: { id: true },
     });
+    let accountId: string;
     if (existing) {
       const updated = await prisma.instagramAccount.updateMany({
         where: { id: existing.id, workspaceId, platform: adapter.platform },
@@ -85,17 +87,28 @@ export async function storeConnectedAccounts({
         refused ??= "already_connected";
         continue;
       }
+      accountId = existing.id;
     } else {
-      await prisma.instagramAccount.create({
+      const created = await prisma.instagramAccount.create({
         data: {
           ...data,
           workspaceId,
           instagramId: grant.externalId,
           platform: adapter.platform,
         },
+        select: { id: true },
       });
+      accountId = created.id;
     }
     connected += 1;
+    await announceConnected({
+      id: accountId,
+      workspaceId,
+      platform: adapter.platform,
+      username: grant.username,
+      name: grant.name,
+      reconnected: existing !== null,
+    });
   }
 
   return { connected, refused };

@@ -1,14 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockPrisma, mockContext } = vi.hoisted(() => ({
+const { mockPrisma, mockContext, mockAnnounce } = vi.hoisted(() => ({
+  mockAnnounce: vi.fn(),
   mockPrisma: {
-    instagramAccount: { deleteMany: vi.fn() },
+    instagramAccount: { deleteMany: vi.fn(), findFirst: vi.fn() },
     operationalEvent: { create: vi.fn() },
   },
   mockContext: vi.fn(),
 }));
 
 vi.mock("@/lib/db/client", () => ({ prisma: mockPrisma }));
+vi.mock("@/lib/webhooks/account-events", () => ({ announceDisconnected: mockAnnounce }));
 vi.mock("@/lib/workspace-access", () => ({
   getCurrentWorkspaceContext: mockContext,
   canManageWorkspace: (role: string) => role === "OWNER" || role === "ADMIN",
@@ -32,6 +34,8 @@ beforeEach(() => {
     userId: "user_1",
   });
   mockPrisma.instagramAccount.deleteMany.mockResolvedValue({ count: 1 });
+  mockPrisma.instagramAccount.findFirst.mockResolvedValue({ platform: "INSTAGRAM" });
+  mockAnnounce.mockResolvedValue(undefined);
   mockPrisma.operationalEvent.create.mockResolvedValue({});
 });
 
@@ -118,5 +122,20 @@ describe("POST /api/instagram/disconnect", () => {
 
     expect(response.status).toBe(403);
     expect(mockPrisma.instagramAccount.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("tells listening partner apps the account is gone, only when it was this workspace's", async () => {
+    await POST(post({ instagramAccountId: "acct_1" }));
+    expect(mockAnnounce).toHaveBeenCalledWith(
+      [{ id: "acct_1", workspaceId: "workspace_1" }],
+      "INSTAGRAM",
+      "disconnected"
+    );
+
+    mockAnnounce.mockClear();
+    mockPrisma.instagramAccount.findFirst.mockResolvedValue(null);
+    mockPrisma.instagramAccount.deleteMany.mockResolvedValue({ count: 0 });
+    await POST(post({ instagramAccountId: "theirs" }));
+    expect(mockAnnounce).not.toHaveBeenCalled();
   });
 });

@@ -18,6 +18,7 @@ import type {
   ReactionEvent,
 } from "@/lib/channels/events";
 import { Prisma } from "@/app/generated/prisma/client";
+import { emitEvent } from "@/lib/webhooks/events";
 
 const OPENING_DM_READ_FALLBACK_DELAY_MS = 5 * 60 * 1000;
 
@@ -400,6 +401,25 @@ export async function processChannelWebhook({
           // a keyword match: "stop" is not a campaign trigger.
           await markInbound(account, event.senderId);
           const intent = detectOptOutIntent(event.text);
+          // Every inbound message, an opt-out included, is told to listening
+          // partner apps, so their copy of the conversation is complete.
+          await emitEvent({
+            workspaceId: account.workspaceId,
+            type: "dm.received",
+            dedupeKey: `${account.id}:${event.messageId}`,
+            at: receivedAt,
+            data: {
+              account: { id: account.id, platform: adapter.platform },
+              sender: { id: event.senderId },
+              message: {
+                id: event.messageId,
+                text: event.text,
+                kind: event.kind,
+                ...(event.quickReplyPayload ? { quickReplyPayload: event.quickReplyPayload } : {}),
+              },
+              optOut: intent === "opt_out",
+            },
+          });
           if (intent) {
             await applyOptOut({
               instagramAccountId: account.id,

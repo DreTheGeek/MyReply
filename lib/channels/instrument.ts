@@ -1,5 +1,6 @@
 import type { ChannelPlatform } from "@/app/generated/prisma/client";
 import { recordUsage } from "@/lib/usage/meter";
+import { emitEvent } from "@/lib/webhooks/events";
 import type { ChannelAdapter, ChannelMessaging } from "./adapter";
 import type { OutboundContent, SendReceipt, SendTarget } from "./content";
 
@@ -25,13 +26,20 @@ export interface SendObservation {
   content: OutboundContent;
 }
 
+/**
+ * Why a send failed, in the two kinds a partner can act on. "rejected": the
+ * platform refused it, so it did not arrive. "unconfirmed": the platform's
+ * answer was ambiguous and the message may have arrived, so it is not retried.
+ */
+export type FailureReason = "rejected" | "unconfirmed";
+
 export interface ChannelObserver {
   sent(observation: SendObservation, receipt: SendReceipt): Promise<void>;
-  failed(observation: SendObservation, error: unknown): Promise<void>;
+  failed(observation: SendObservation, error: unknown, reason: FailureReason): Promise<void>;
   publicReplied(observation: Omit<SendObservation, "to" | "content"> & { commentId: string }): Promise<void>;
 }
 
-/** Usage only. Event delivery adds itself through registerChannelObserver. */
+/** Usage: what each send costs the workspace, by platform. */
 const meterObserver: ChannelObserver = {
   async sent(observation) {
     await recordUsage({
@@ -52,7 +60,56 @@ const meterObserver: ChannelObserver = {
   },
 };
 
-const observers: ChannelObserver[] = [meterObserver];
+function recipientOf(to: SendTarget): Record<string, string> {
+  return to.kind === "user" ? { id: to.userId } : { commentId: to.commentId };
+}
+
+function textOf(content: OutboundContent): string | null {
+  return content.kind === "attachment" ? null : content.text;
+}
+
+/** dm.sent and dm.failed, to whichever endpoints listen for them. */
+const eventObserver: ChannelObserver = {
+  async sent(observation, receipt) {
+    await emitEvent({
+      workspaceId: observation.workspaceId,
+      type: "dm.sent",
+      // The platform's message id is one per real message; without one, each
+      // send is its own event.
+      dedupeKey: receipt.messageId ? `${observation.accountId}:${receipt.messageId}` : undefined,
+      data: {
+        account: { id: observation.accountId, platform: observation.platform },
+        recipient: { ...recipientOf(observation.to), ...(receipt.recipientId ? { id: receipt.recipientId } : {}) },
+        message: {
+          id: receipt.messageId ?? null,
+          kind: observation.content.kind,
+          text: textOf(observation.content),
+        },
+        source: observation.source,
+      },
+    });
+  },
+  async failed(observation, _error, reason) {
+    // The platform's own error text stays in our logs: it can carry account
+    // details, and the reason is what a partner can act on.
+    await emitEvent({
+      workspaceId: observation.workspaceId,
+      type: "dm.failed",
+      data: {
+        account: { id: observation.accountId, platform: observation.platform },
+        recipient: recipientOf(observation.to),
+        message: { kind: observation.content.kind, text: textOf(observation.content) },
+        reason,
+        source: observation.source,
+      },
+    });
+  },
+  async publicReplied() {
+    // Public replies are metered but not an event of their own.
+  },
+};
+
+const observers: ChannelObserver[] = [meterObserver, eventObserver];
 
 export function registerChannelObserver(observer: ChannelObserver): void {
   if (!observers.includes(observer)) observers.push(observer);
@@ -91,7 +148,13 @@ export function instrumentAdapter(
       try {
         receipt = await adapter.messaging.send(context, input);
       } catch (error) {
-        await notify((observer) => observer.failed(observation, error));
+        let reason: FailureReason = "unconfirmed";
+        try {
+          reason = adapter.errors.isConfirmedRejection(error) ? "rejected" : "unconfirmed";
+        } catch {
+          // An adapter that cannot classify leaves the safe answer: unconfirmed.
+        }
+        await notify((observer) => observer.failed(observation, error, reason));
         throw error;
       }
       await notify((observer) => observer.sent(observation, receipt));
