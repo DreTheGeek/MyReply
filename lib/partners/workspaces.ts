@@ -3,6 +3,7 @@ import { Prisma } from "@/app/generated/prisma/client";
 import type { ChannelPlatform } from "@/app/generated/prisma/client";
 import { recordAuditEvent } from "@/lib/audit";
 import { prisma } from "@/lib/db/client";
+import { hostedLinkMail, partnerSender, sendPartnerMail } from "@/lib/email/partner-mail";
 import { getBaseUrl } from "@/lib/env";
 import {
   MAX_LINK_MINUTES,
@@ -61,12 +62,16 @@ export const connectLinkSchema = z
     returnUrl: z.string().url().max(2000),
     platforms: z.array(z.enum(HOSTED_CONNECT_PLATFORMS)).min(1).max(2).optional(),
     expiresInMinutes: z.number().int().min(1).max(MAX_LINK_MINUTES.connect).optional(),
+    /** Email the link to this person, from the partner's own sender. */
+    sendTo: z.string().trim().email().max(254).optional(),
   })
   .strict();
 
 export const inboxLinkSchema = z
   .object({
     expiresInMinutes: z.number().int().min(1).max(MAX_LINK_MINUTES.inbox).optional(),
+    /** Email the link to this person, from the partner's own sender. */
+    sendTo: z.string().trim().email().max(254).optional(),
   })
   .strict();
 
@@ -308,8 +313,30 @@ export async function deletePartnerWorkspace(
 }
 
 export type ConnectLinkResult =
-  | { ok: true; url: string; expiresAt: string }
+  | { ok: true; url: string; expiresAt: string; emailed: boolean }
   | { ok: false; status: number; error: string };
+
+const NO_SENDER =
+  "To email links, set up your sending address with us first. The link was not made.";
+
+/**
+ * Email a freshly minted link when asked to. A failure to send does not undo
+ * the link: the partner gets it back with emailed false and can show it.
+ */
+async function emailLink(
+  partnerId: string,
+  kind: "connect" | "inbox",
+  link: { url: string; expiresAt: string },
+  to: string | undefined
+): Promise<boolean> {
+  if (!to) return false;
+  const partner = await prisma.partner.findUnique({ where: { id: partnerId }, select: { brandName: true } });
+  const result = await sendPartnerMail(
+    partnerId,
+    hostedLinkMail({ kind, brandName: partner?.brandName ?? "", url: link.url, expiresAt: link.expiresAt, to })
+  );
+  return result.ok;
+}
 
 /** A signed hosted "connect your accounts" link for one of the partner's workspaces. */
 export async function createConnectLink(
@@ -340,6 +367,10 @@ export async function createConnectLink(
     };
   }
 
+  if (input.sendTo && !(await partnerSender(partnerId))) {
+    return { ok: false, status: 400, error: NO_SENDER };
+  }
+
   const { token, expiresAt } = createHostedToken(
     {
       k: "connect",
@@ -352,11 +383,11 @@ export async function createConnectLink(
     input.expiresInMinutes ?? MAX_LINK_MINUTES.connect
   );
 
-  return {
-    ok: true,
+  const link = {
     url: `${hostedBaseUrl(partner.customDomain, getBaseUrl())}/hosted/connect/${token}`,
     expiresAt: expiresAt.toISOString(),
   };
+  return { ok: true, ...link, emailed: await emailLink(partnerId, "connect", link, input.sendTo) };
 }
 
 /**
@@ -381,13 +412,17 @@ export async function createInboxLink(
     return { ok: false, status: 404, error: "That workspace was not found for this key." };
   }
 
+  if (input.sendTo && !(await partnerSender(partnerId))) {
+    return { ok: false, status: 400, error: NO_SENDER };
+  }
+
   const { token, expiresAt } = createHostedToken(
     { k: "inbox", w: workspace.id, p: partnerId, fa: partner.frameOrigins },
     input.expiresInMinutes ?? 60
   );
-  return {
-    ok: true,
+  const link = {
     url: `${hostedBaseUrl(partner.customDomain, getBaseUrl())}/hosted/inbox/${token}`,
     expiresAt: expiresAt.toISOString(),
   };
+  return { ok: true, ...link, emailed: await emailLink(partnerId, "inbox", link, input.sendTo) };
 }
