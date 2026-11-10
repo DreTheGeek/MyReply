@@ -1298,3 +1298,28 @@ model DataDeletionRequest {
 
   @@index([requestedAt])
 }
+
+/// One write made through the v1 API with an Idempotency-Key, and the answer
+/// it got. A retry with the same key and the same request is answered from
+/// here instead of running again, so a dropped connection never creates a
+/// campaign twice or sends a message twice. Keyed per credential, so two
+/// integrations choosing the same key never collide. Kept for 24 hours.
+model IdempotencyRecord {
+  id           String    @id @default(cuid())
+  /// The credential's rate limit identity, such as key:<id>. Never the secret.
+  credentialId String
+  key          String
+  method       String
+  path         String
+  /// SHA-256 of the method, path and body, so the same key on a different
+  /// request is refused rather than answered with the wrong reply.
+  requestHash  String
+  /// Null while the first request is still running.
+  status       Int?
+  body         String?
+  createdAt    DateTime  @default(now())
+  completedAt  DateTime?
+
+  @@unique([credentialId, key])
+  @@index([createdAt])
+}

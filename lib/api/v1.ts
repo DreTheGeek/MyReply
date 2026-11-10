@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import type { ApiKeyContext } from "@/lib/api-keys";
 import { runAsCaller } from "@/lib/api/caller-context";
+import { withIdempotency } from "@/lib/api/idempotency";
 import { consumeCredentialRequest, rateLimitRefusal } from "@/lib/api/rate-limit";
 import { hasScope, type ApiScope } from "@/lib/api/scopes";
 import {
@@ -114,9 +115,15 @@ export type V1Handler<P> = (
  * Nothing internal reaches the client. A thrown error is logged here with the
  * route and answered with a plain 500.
  */
+export interface V1RouteOptions {
+  /** Refuse a write without an Idempotency-Key, where a duplicate does harm. */
+  requireIdempotencyKey?: boolean;
+}
+
 export function v1Route<P = Record<string, never>>(
   scope: ApiScope | null,
-  handler: V1Handler<P>
+  handler: V1Handler<P>,
+  options: V1RouteOptions = {}
 ): (request: NextRequest, context: RouteContext<P>) => Promise<Response> {
   return async (request, context) => {
     const caller = await requireApiKey(scope ?? undefined);
@@ -124,7 +131,13 @@ export function v1Route<P = Record<string, never>>(
 
     try {
       const params = context?.params ? await context.params : ({} as P);
-      return await runAsCaller(caller, () => handler(request, caller, params));
+      // Every write takes an Idempotency-Key, keyed to this credential.
+      return await withIdempotency(
+        request,
+        caller.credentialId,
+        (replayable) => runAsCaller(caller, () => handler(replayable, caller, params)),
+        { required: options.requireIdempotencyKey }
+      );
     } catch (error) {
       console.error(
         `[v1] ${request.method} ${request.nextUrl.pathname} failed:`,
@@ -171,7 +184,9 @@ export function partnerRoute<P = Record<string, never>>(
 
     try {
       const params = context?.params ? await context.params : ({} as P);
-      return await handler(request, partner, params);
+      return await withIdempotency(request, partner.credentialId, (replayable) =>
+        handler(replayable, partner, params)
+      );
     } catch (error) {
       console.error(
         `[v1] ${request.method} ${request.nextUrl.pathname} failed:`,
