@@ -28,7 +28,7 @@ import {
 import {
   isRoutablePostbackPayload,
   parseQuickReplies,
-} from "@/lib/meta/quick-replies";
+} from "@/lib/campaigns/quick-replies";
 import { recordContactDm, upsertContact } from "@/lib/contacts";
 import { matchKeywords } from "@/lib/utils/keyword-matcher";
 import { reserveDMSlot, releaseDMSlot } from "@/lib/utils/rate-limiter";
