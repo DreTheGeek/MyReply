@@ -146,6 +146,7 @@ import { MetaApiError, RateLimitError } from "@/lib/meta/client";
 import { createDMWorker } from "../lib/queue/dm-worker";
 import { getRedisConnection } from "@/lib/queue/client";
 import { hashRecipientId } from "@/lib/tracking/server";
+import { DEFAULT_FOLLOW_PROMPT } from "@/lib/campaigns/follow-prompt";
 
 const usagePeriodStart = new Date("2026-05-01T00:00:00.000Z");
 
@@ -1287,6 +1288,24 @@ describe("DM Worker — DM keyword trigger", () => {
         create: expect.objectContaining({ status: "FAILED" }),
       })
     );
+  });
+});
+
+describe("DM Worker, the default follow-gate prompt", () => {
+  it("sends neutral copy when the campaign wrote no prompt of its own", async () => {
+    mockPrisma.automation.findMany.mockResolvedValue([
+      { ...mockAutomation, requireFollow: true, followPromptMessage: null },
+    ]);
+    mockGetUserFollowStatus.mockResolvedValue(false);
+
+    await getProcessor()(createMockJob());
+
+    expect(mockSendPrivateReplyWithButton).toHaveBeenCalledTimes(1);
+    const text = mockSendPrivateReplyWithButton.mock.calls[0][3] as string;
+    expect(text).toBe(DEFAULT_FOLLOW_PROMPT);
+    // Every business on the platform inherits this text, so it must not
+    // promote anything of ours.
+    expect(text.toLowerCase()).not.toMatch(/github|star the repo|support me/);
   });
 });
 

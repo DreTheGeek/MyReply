@@ -436,7 +436,7 @@
   "over {count} days": "過去 {count} 天",
   "personalizes it. Max 24 hours, to stay inside Instagram's messaging window.": "會帶入對方帳號名稱。最長延遲 24 小時，以符合 Instagram 的訊息傳送期限。",
   "personalizes.": "會帶入對方的帳號名稱。",
-  "quick favor before i send your link. i don't make any money from this, it's free. if you want to support me, just don't unfollow after, and star the repo on github if it helps you. tap the button once you're following and i'll send it over": "傳送連結前，請先追蹤我的帳號。這份資源免費提供，如果對你有幫助，也歡迎在 GitHub 給專案一顆星。完成追蹤後，點擊下方按鈕即可收到連結。",
+  "Follow this account, then tap the button below and I'll send your link.": "先追蹤這個帳號，再點下方按鈕，我就會把連結傳給你。",
   "redirects to": "轉址至",
   "reply to their comments under the post": "同時在貼文下公開回覆留言",
   "runs": "次觸發",

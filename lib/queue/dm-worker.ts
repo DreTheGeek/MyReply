@@ -67,6 +67,7 @@ import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
 import { hashRecipientId } from "@/lib/tracking/server";
 
 import { ZernioApiError } from "@/lib/zernio/client";
+import { DEFAULT_FOLLOW_PROMPT } from "@/lib/campaigns/follow-prompt";
 
 const BACKOFF_DELAYS = [5 * 60 * 1000, 15 * 60 * 1000, 45 * 60 * 1000];
 
@@ -827,7 +828,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
         const promptText = renderMessageWithoutLink({
           message:
             automation.followPromptMessage ||
-            "quick favor before i send your link. i don't make any money from this, it's free. if you want to support me, just don't unfollow after, and star the repo on github if it helps you. tap the button once you're following and i'll send it over",
+            DEFAULT_FOLLOW_PROMPT,
           commenterName,
         });
         await sendPrivateReplyWithButton({
@@ -1237,7 +1238,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
       const promptText = renderMessageWithoutLink({
         message:
           automation.followPromptMessage ||
-          "quick favor before i send your link. i don't make any money from this, it's free. if you want to support me, just don't unfollow after, and star the repo on github if it helps you. tap the button once you're following and i'll send it over",
+          DEFAULT_FOLLOW_PROMPT,
         commenterName,
       });
       try {

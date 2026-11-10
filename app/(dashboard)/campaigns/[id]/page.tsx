@@ -14,6 +14,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { describeTrigger } from "@/lib/campaigns/describe-trigger";
 import CampaignPreview, { type PreviewTab } from "@/components/campaign-preview";
+import { DEFAULT_FOLLOW_PROMPT } from "@/lib/campaigns/follow-prompt";
 
 interface Campaign {
   id: string;
@@ -282,7 +283,7 @@ export default function CampaignDetailPage() {
           <Summary title={t("They must follow first")}>
             <FieldBox>
               {campaign.followPromptMessage ||
-                "quick favor before i send your link. i don't make any money from this, it's free. if you want to support me, just don't unfollow after, and star the repo on github if it helps you. tap the button once you're following and i'll send it over"}
+                DEFAULT_FOLLOW_PROMPT}
             </FieldBox>
             <FieldBox>
               {campaign.followPromptButtonLabel || "i'm following"}
