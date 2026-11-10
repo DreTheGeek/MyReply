@@ -451,5 +451,12 @@
   "”": "」",
   "← Campaigns": "← 返回活動列表",
   "Free covers one account": "免費方案可連結一個帳號",
-  "Your plan connects one Instagram account, and it is already in use. Pro removes the limit rather than raising it to a number. Everything else on Free stays uncapped.": "你的方案可連結一個 Instagram 帳號，而它已在使用中。Pro 會直接取消這個限制，而不是把上限調高到某個數字。免費方案的其他功能都不設上限。"
+  "Your plan connects one Instagram account, and it is already in use. Pro removes the limit rather than raising it to a number. Everything else on Free stays uncapped.": "你的方案可連結一個 Instagram 帳號，而它已在使用中。Pro 會直接取消這個限制，而不是把上限調高到某個數字。免費方案的其他功能都不設上限。",
+  "Choose email, phone or both to ask for.": "請選擇要索取電子郵件、電話，或兩者都要。",
+  "Add the wording people agree to when they share their details.": "請加上對方分享資料時所同意的文字。",
+  "ask for their email or phone number": "索取對方的電子郵件或電話號碼",
+  "Email": "電子郵件",
+  "Phone number": "電話號碼",
+  "What they agree to": "對方同意的內容",
+  "This message goes out after the one above, but only if they've messaged you or tapped a button. They share their details in one tap. We save this wording and the time they tapped with what they shared.": "這則訊息會在上面那則之後送出，但只有在對方傳訊息給你或點過按鈕時才會送出。對方點一下就能分享資料，我們會把這段文字和點按時間，連同對方分享的資料一起保存。"
 }

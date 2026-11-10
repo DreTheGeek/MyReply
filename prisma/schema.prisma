@@ -214,6 +214,11 @@ model Contact {
   /// comment does not set it: a comment opens one private reply, not a
   /// conversation. Null on rows from before it was recorded.
   lastInboundAt      DateTime?
+  /// The email or phone number this person shared by tapping a campaign's
+  /// capture button. The proof of what they agreed to, and when, is the
+  /// ContactConsent row; these are the current values for display and export.
+  email              String?
+  phone              String?
   /// Positive reactions this person has placed on messages we delivered.
   /// Only "react" moves this; an "unreact" is a withdrawal, not a signal, so
   /// it is deliberately not recorded and never decrements. Segmentation asks
@@ -232,6 +237,7 @@ model Contact {
   flowRuns         FlowRun[]
   conversions      Conversion[]
   outboundMessages OutboundMessage[]
+  consents         ContactConsent[]
 
   @@unique([instagramAccountId, externalId])
   @@index([workspaceId])
@@ -333,6 +339,7 @@ model InstagramAccount {
   linkClicks        LinkClick[]
   followerSnapshots FollowerSnapshot[]
   contacts          Contact[]
+  capturePrompts    CapturePrompt[]
   outboundMessages  OutboundMessage[]
 
   @@index([workspaceId])
@@ -421,6 +428,15 @@ model Automation {
   publicReplyEnabled      Boolean  @default(false)
   publicReplyMessage      String?
   publicReplyMessages     String[] @default([])
+  /// Ask for an email or phone number after the campaign's message. Sent as
+  /// its own message, with the platform's one-tap email and phone buttons,
+  /// only where the person has already written to the account. captureKinds
+  /// holds "email" and/or "phone". The consent wording is shown under the ask
+  /// and stored, word for word, with every detail collected.
+  captureEnabled          Boolean  @default(false)
+  captureKinds            String[] @default([])
+  capturePrompt           String?
+  captureConsentText      String?
   isActive                Boolean  @default(true)
   wholeWordMatch          Boolean  @default(true)
   reportShareSlug         String?  @unique
@@ -435,6 +451,8 @@ model Automation {
   trackedLinks     TrackedLink[]
   linkClicks       LinkClick[]
   conversions      Conversion[]
+  capturePrompts   CapturePrompt[]
+  consents         ContactConsent[]
 
   @@index([workspaceId])
   @@index([instagramAccountId])
@@ -1133,4 +1151,54 @@ enum ConversionSource {
 model PostbackDelivery {
   id String @id
   createdAt DateTime @default(now())
+}
+
+enum ContactDetailKind {
+  EMAIL
+  PHONE
+}
+
+/// A capture ask the engine sent: who it went to, which details it offered
+/// and the consent wording exactly as shown. A tap on an email or phone button
+/// is only recorded against one of these, so a detail is never stored without
+/// the words the person saw when they shared it. Kept for 30 days.
+model CapturePrompt {
+  id                  String              @id @default(cuid())
+  workspaceId         String
+  instagramAccountId  String
+  automationId        String?
+  /// The platform-scoped id of the person it was sent to.
+  recipientExternalId String
+  kinds               ContactDetailKind[]
+  consentText         String
+  sentAt              DateTime            @default(now())
+
+  instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+  automation       Automation?      @relation(fields: [automationId], references: [id], onDelete: SetNull)
+
+  @@index([instagramAccountId, recipientExternalId, sentAt])
+  @@index([sentAt])
+}
+
+/// A contact detail a person chose to share, with the proof: the wording they
+/// were shown, when they tapped, and the message that carried it. One row per
+/// tap; a retried webhook finds the same message id and writes nothing new.
+model ContactConsent {
+  id              String            @id @default(cuid())
+  workspaceId     String
+  contactId       String
+  automationId    String?
+  kind            ContactDetailKind
+  value           String
+  consentText     String
+  consentedAt     DateTime
+  /// The platform's id for the message the tap arrived as.
+  sourceMessageId String
+  createdAt       DateTime          @default(now())
+
+  contact    Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  automation Automation? @relation(fields: [automationId], references: [id], onDelete: SetNull)
+
+  @@unique([contactId, sourceMessageId])
+  @@index([workspaceId, consentedAt])
 }

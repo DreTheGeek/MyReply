@@ -235,3 +235,67 @@ describe("PATCH /api/automations: editing the new triggers", () => {
     expect(call[0].data).toMatchObject({ storyMentionEnabled: true });
   });
 });
+
+describe("/api/automations: asking for an email or phone number", () => {
+  it("stores the ask, its kinds and its consent wording", async () => {
+    const response = await createCampaign({
+      ...baseCampaign,
+      dmTriggerEnabled: true,
+      captureEnabled: true,
+      captureKinds: ["phone", "email"],
+      capturePrompt: "  Want reminders?  ",
+      captureConsentText: " We text about bookings only. ",
+    });
+
+    expect(response.status).toBe(201);
+    expect(mockPrisma.automation.create.mock.calls[0][0].data).toMatchObject({
+      captureEnabled: true,
+      captureKinds: ["email", "phone"],
+      capturePrompt: "Want reminders?",
+      captureConsentText: "We text about bookings only.",
+    });
+  });
+
+  it("refuses an ask for nothing", async () => {
+    const response = await createCampaign({
+      ...baseCampaign,
+      dmTriggerEnabled: true,
+      captureEnabled: true,
+      captureKinds: [],
+    });
+    expect(response.status).toBe(400);
+    expect(mockPrisma.automation.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses a kind the engine does not collect", async () => {
+    const response = await createCampaign({
+      ...baseCampaign,
+      dmTriggerEnabled: true,
+      captureEnabled: true,
+      captureKinds: ["address"],
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it("turning it on later needs a kind, judged against the saved campaign", async () => {
+    mockPrisma.automation.findFirst.mockResolvedValue({
+      id: "automation_123",
+      workspaceId: "workspace_123",
+      captureEnabled: false,
+      captureKinds: [],
+    });
+    const response = await updateCampaign({ captureEnabled: true });
+    expect(response.status).toBe(400);
+    expect(mockPrisma.automation.update).not.toHaveBeenCalled();
+  });
+
+  it("turning it off clears it", async () => {
+    await updateCampaign({ captureEnabled: false });
+    expect(mockPrisma.automation.update.mock.calls[0][0].data).toMatchObject({
+      captureEnabled: false,
+      captureKinds: [],
+      capturePrompt: null,
+      captureConsentText: null,
+    });
+  });
+});

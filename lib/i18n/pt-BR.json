@@ -451,5 +451,12 @@
   "”": "”",
   "← Campaigns": "← Campanhas",
   "Free covers one account": "O plano gratuito cobre uma conta",
-  "Your plan connects one Instagram account, and it is already in use. Pro removes the limit rather than raising it to a number. Everything else on Free stays uncapped.": "Seu plano conecta uma conta do Instagram, e ela já está em uso. O Pro remove o limite em vez de aumentá-lo para um número. Todo o resto no plano gratuito continua sem limite."
+  "Your plan connects one Instagram account, and it is already in use. Pro removes the limit rather than raising it to a number. Everything else on Free stays uncapped.": "Seu plano conecta uma conta do Instagram, e ela já está em uso. O Pro remove o limite em vez de aumentá-lo para um número. Todo o resto no plano gratuito continua sem limite.",
+  "Choose email, phone or both to ask for.": "Escolha pedir e-mail, telefone ou os dois.",
+  "Add the wording people agree to when they share their details.": "Adicione o texto com que as pessoas concordam ao compartilhar seus dados.",
+  "ask for their email or phone number": "pedir o e-mail ou telefone da pessoa",
+  "Email": "E-mail",
+  "Phone number": "Telefone",
+  "What they agree to": "Com o que a pessoa concorda",
+  "This message goes out after the one above, but only if they've messaged you or tapped a button. They share their details in one tap. We save this wording and the time they tapped with what they shared.": "Esta mensagem é enviada depois da de cima, mas só se a pessoa tiver te mandado mensagem ou tocado em um botão. Ela compartilha os dados com um toque. Guardamos este texto e o horário do toque junto com o que ela compartilhou."
 }

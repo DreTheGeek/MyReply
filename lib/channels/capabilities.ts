@@ -212,6 +212,8 @@ export interface CampaignFeatureSupport {
   openingDm: boolean;
   linkButtons: boolean;
   quickReplies: boolean;
+  /** Asking for an email or phone number with the one-tap buttons. */
+  contactCapture: { email: boolean; phone: boolean };
   attachment: boolean;
   followGate: boolean;
 }
@@ -233,6 +235,11 @@ export function campaignFeatureSupport(
     openingDm: buttons.postback,
     linkButtons: buttons.url,
     quickReplies: quickReplies.supported,
+    // Sent as its own message after the campaign's, so it needs a DM too.
+    contactCapture: {
+      email: quickReplies.supported && quickReplies.collectsEmail && capabilities.directMessage,
+      phone: quickReplies.supported && quickReplies.collectsPhone && capabilities.directMessage,
+    },
     attachment: media.image || media.video || media.audio || media.file,
     // The gate needs both the follow check and a button to re-check on.
     followGate: capabilities.followGate && buttons.postback,

@@ -87,7 +87,15 @@ export async function GET(request: NextRequest) {
         dmCount: true,
         lastDmAt: true,
         optedOutAt: true,
+        email: true,
+        phone: true,
         instagramAccount: { select: { username: true } },
+        // The latest detail they shared, with the wording they agreed to.
+        consents: {
+          orderBy: { consentedAt: "desc" },
+          take: 1,
+          select: { consentedAt: true, consentText: true },
+        },
       },
     });
 
@@ -104,6 +112,13 @@ export async function GET(request: NextRequest) {
         header: "Opted out",
         value: (r) => r.optedOutAt?.toISOString() ?? null,
       },
+      { header: "Email", value: (r) => r.email },
+      { header: "Phone", value: (r) => r.phone },
+      {
+        header: "Shared on",
+        value: (r) => r.consents[0]?.consentedAt.toISOString() ?? null,
+      },
+      { header: "Agreed to", value: (r) => r.consents[0]?.consentText ?? null },
     ];
 
     await recordAuditEvent({

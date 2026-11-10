@@ -451,5 +451,12 @@
   "”": "»",
   "← Campaigns": "← Кампании",
   "Free covers one account": "Бесплатный тариф: один аккаунт",
-  "Your plan connects one Instagram account, and it is already in use. Pro removes the limit rather than raising it to a number. Everything else on Free stays uncapped.": "Ваш тариф подключает один аккаунт Instagram, и он уже используется. Pro снимает ограничение, а не повышает его до какого-то числа. Всё остальное на бесплатном тарифе остаётся без ограничений."
+  "Your plan connects one Instagram account, and it is already in use. Pro removes the limit rather than raising it to a number. Everything else on Free stays uncapped.": "Ваш тариф подключает один аккаунт Instagram, и он уже используется. Pro снимает ограничение, а не повышает его до какого-то числа. Всё остальное на бесплатном тарифе остаётся без ограничений.",
+  "Choose email, phone or both to ask for.": "Выберите, что запросить: эл. почту, телефон или и то и другое.",
+  "Add the wording people agree to when they share their details.": "Добавьте текст, с которым люди соглашаются, когда делятся своими данными.",
+  "ask for their email or phone number": "попросить эл. почту или номер телефона",
+  "Email": "Эл. почта",
+  "Phone number": "Номер телефона",
+  "What they agree to": "С чем человек соглашается",
+  "This message goes out after the one above, but only if they've messaged you or tapped a button. They share their details in one tap. We save this wording and the time they tapped with what they shared.": "Это сообщение уходит после сообщения выше, но только если человек написал вам или нажал кнопку. Он делится данными одним нажатием. Мы сохраняем этот текст и время нажатия вместе с тем, чем он поделился."
 }

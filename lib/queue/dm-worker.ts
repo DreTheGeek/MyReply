@@ -51,6 +51,13 @@ import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
 import { hashRecipientId } from "@/lib/tracking/server";
 
 import { DEFAULT_FOLLOW_PROMPT } from "@/lib/campaigns/follow-prompt";
+import {
+  buildCaptureAsk,
+  CAPTURE_ANSWER_WINDOW_MS,
+  detailKindEnum,
+  parseCapturedDetail,
+  type CaptureSettings,
+} from "@/lib/campaigns/capture";
 
 const BACKOFF_DELAYS = [5 * 60 * 1000, 15 * 60 * 1000, 45 * 60 * 1000];
 
@@ -180,6 +187,15 @@ type RevealAutomation = {
   // campaigns written before the field existed carry neither.
   quickRepliesEnabled?: boolean;
   quickReplies?: unknown;
+} & CaptureOwner &
+  CaptureSettings;
+
+/** Who a capture ask belongs to. Absent on rows read without these columns. */
+type CaptureOwner = {
+  id?: string;
+  workspaceId?: string;
+  /** The connected account's row id. */
+  instagramAccountId?: string;
 };
 
 /**
@@ -222,7 +238,167 @@ async function sendAttachmentIfAny(
  * button-tap (postback) path and the DM keyword-trigger path, both already
  * have an open conversation with the user, so neither uses a private reply.
  */
-async function sendRevealDirectMessage({
+async function sendRevealDirectMessage(args: {
+  channel: OpenChannel;
+  automation: RevealAutomation;
+  userId: string;
+  commenterName: string | null;
+  context: string;
+}): Promise<void> {
+  await deliverRevealMessage(args);
+  // Both callers run where the person has just written or tapped, so the
+  // window is open for one more message: the campaign's capture ask, if any.
+  await sendCaptureAskIfAny(args.channel, args.automation, args.userId, args.context);
+}
+
+/**
+ * Ask for an email or phone number, once the campaign's message is out.
+ *
+ * The ask is recorded before it is sent, with its consent wording exactly as
+ * shown, because a tap is only stored against a recorded ask: a record that
+ * exists for an ask that failed to send is harmless (nobody can tap it), while
+ * a sent ask with no record would lose the proof of what the person agreed to.
+ * A failure here never fails the job, which would resend the message the
+ * person asked for.
+ */
+async function sendCaptureAskIfAny(
+  channel: OpenChannel,
+  automation: CaptureOwner & CaptureSettings,
+  userId: string,
+  context: string
+): Promise<void> {
+  const quickReplies = channel.adapter.capabilities.quickReplies;
+  if (!quickReplies.supported) return;
+  const ask = buildCaptureAsk(automation, {
+    email: quickReplies.collectsEmail,
+    phone: quickReplies.collectsPhone,
+  });
+  if (!ask || !automation.id || !automation.workspaceId || !automation.instagramAccountId) {
+    return;
+  }
+
+  let promptId: string;
+  try {
+    const prompt = await prisma.capturePrompt.create({
+      data: {
+        workspaceId: automation.workspaceId,
+        instagramAccountId: automation.instagramAccountId,
+        automationId: automation.id,
+        recipientExternalId: userId,
+        kinds: ask.kinds.map(detailKindEnum),
+        consentText: ask.consentText,
+      },
+      select: { id: true },
+    });
+    promptId = prompt.id;
+  } catch (error) {
+    console.warn(
+      `[DM Worker] Capture ask not sent in ${context}: it could not be recorded`,
+      formatError(error)
+    );
+    return;
+  }
+
+  try {
+    await channel.adapter.messaging.send(channel.context, {
+      to: { kind: "user", userId },
+      content: {
+        kind: "text",
+        text: ask.text,
+        quickReplies: ask.kinds.map((kind) => ({
+          type: kind,
+          title: kind === "email" ? "Email" : "Phone",
+        })),
+      },
+    });
+  } catch (error) {
+    console.warn(
+      `[DM Worker] Capture ask failed in ${context}, message already delivered:`,
+      formatError(error)
+    );
+    await prisma.capturePrompt
+      .delete({ where: { id: promptId } })
+      .catch((cleanupError: unknown) => {
+        console.warn("[DM Worker] Unsent capture ask left recorded:", formatError(cleanupError));
+      });
+  }
+}
+
+/**
+ * Record an email or phone number the person tapped to share.
+ *
+ * Returns true when the tap was a capture answer, recorded or already
+ * recorded, so the caller stops there: an email address is not a keyword.
+ * Returns false when the tap is not one: a payload that is not a detail, or a
+ * detail with no ask of ours behind it in the last 7 days. Without an ask
+ * there is no consent wording to stand on, so nothing is stored.
+ */
+async function recordCapturedDetail(job: Job<ProcessMessageJob>): Promise<boolean> {
+  const payload = (job.data as { quickReplyPayload?: unknown }).quickReplyPayload;
+  const detail = parseCapturedDetail(payload);
+  if (!detail) return false;
+
+  const { instagramAccountId, senderId, messageId } = job.data;
+  const account = await prisma.instagramAccount.findFirst({
+    where: {
+      instagramId: instagramAccountId,
+      ...(job.data.accountConnectionId ? { id: job.data.accountConnectionId } : {}),
+    },
+    select: { id: true, workspaceId: true },
+  });
+  if (!account) return false;
+
+  const consentedAt = inboundEvidence(job) ?? new Date();
+  const prompt = await prisma.capturePrompt.findFirst({
+    where: {
+      instagramAccountId: account.id,
+      recipientExternalId: senderId,
+      kinds: { has: detailKindEnum(detail.kind) },
+      sentAt: { gte: new Date(consentedAt.getTime() - CAPTURE_ANSWER_WINDOW_MS) },
+    },
+    orderBy: { sentAt: "desc" },
+  });
+  if (!prompt) return false;
+
+  const contact = await upsertContact({
+    workspaceId: account.workspaceId,
+    instagramAccountId: account.id,
+    externalId: senderId,
+    inboundAt: consentedAt,
+  });
+  if (!contact) {
+    // Thrown so BullMQ retries: the person shared it and it must not be lost.
+    throw new Error("Contact could not be saved for a shared contact detail");
+  }
+
+  await prisma.$transaction([
+    prisma.contactConsent.upsert({
+      where: { contactId_sourceMessageId: { contactId: contact.id, sourceMessageId: messageId } },
+      create: {
+        workspaceId: account.workspaceId,
+        contactId: contact.id,
+        automationId: prompt.automationId,
+        kind: detailKindEnum(detail.kind),
+        value: detail.value,
+        consentText: prompt.consentText,
+        consentedAt,
+        sourceMessageId: messageId,
+      },
+      update: {},
+    }),
+    prisma.contact.update({
+      where: { id: contact.id },
+      data: detail.kind === "email" ? { email: detail.value } : { phone: detail.value },
+    }),
+  ]);
+  console.log("[DM Worker] Contact detail recorded with consent", {
+    kind: detail.kind,
+    automationId: prompt.automationId,
+  });
+  return true;
+}
+
+async function deliverRevealMessage({
   channel,
   automation,
   userId,
@@ -1669,6 +1845,10 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
   // already resolves `reveal:` and `followcheck:` payloads, rather than
   // standing up a second delivery path that would have to repeat its follow
   // gate, usage reservation and logging.
+  // A tap on an email or phone button answers a capture ask. It is recorded
+  // with the consent it was given under and goes no further.
+  if (await recordCapturedDetail(job)) return;
+
   const quickReplyPayload = readQuickReplyPayload(job.data);
   if (quickReplyPayload) {
     return processPostback({

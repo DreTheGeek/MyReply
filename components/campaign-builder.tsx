@@ -14,6 +14,14 @@
 
 import { useI18n } from "@/lib/i18n/provider";
 import { useEffect, useMemo, useState } from "react";
+import {
+  CAPTURE_KINDS,
+  captureKinds as parseCaptureKinds,
+  DEFAULT_CAPTURE_CONSENT,
+  DEFAULT_CAPTURE_PROMPT,
+  MAX_CAPTURE_TEXT,
+  type CaptureKind,
+} from "@/lib/campaigns/capture";
 import { useRouter } from "next/navigation";
 import AccountSelect, { type AccountOption } from "@/components/account-select";
 import PostPicker from "@/components/post-picker";
@@ -63,6 +71,10 @@ interface LoadedCampaign {
   publicReplyEnabled: boolean;
   publicReplyMessage: string | null;
   publicReplyMessages: string[];
+  captureEnabled?: boolean;
+  captureKinds?: string[];
+  capturePrompt?: string | null;
+  captureConsentText?: string | null;
   isActive: boolean;
   instagramAccountId: string;
   trackedLinks?: { destinationUrl: string; label?: string | null }[];
@@ -209,6 +221,14 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   const [followUpEnabled, setFollowUpEnabled] = useState(false);
   const [followUpMessage, setFollowUpMessage] = useState("");
   const [followUpDelayMinutes, setFollowUpDelayMinutes] = useState(0);
+  const [captureEnabled, setCaptureEnabled] = useState(false);
+  const [captureKinds, setCaptureKinds] = useState<CaptureKind[]>(["email"]);
+  const [capturePrompt, setCapturePrompt] = useState("");
+  const [captureConsentText, setCaptureConsentText] = useState(DEFAULT_CAPTURE_CONSENT);
+  const captureAvailable = support.contactCapture.email || support.contactCapture.phone;
+  // Only what this account's platform can prefill is offered or saved.
+  const offeredCaptureKinds = captureKinds.filter((kind) => support.contactCapture[kind]);
+  const captureOn = captureAvailable && captureEnabled;
 
   const [previewTab, setPreviewTab] = useState<PreviewTab>("dm");
 
@@ -324,6 +344,11 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
         setFollowUpEnabled(c.followUpEnabled ?? false);
         setFollowUpMessage(c.followUpMessage ?? "");
         setFollowUpDelayMinutes(c.followUpDelayMinutes ?? 0);
+        setCaptureEnabled(c.captureEnabled ?? false);
+        const savedKinds = parseCaptureKinds(c.captureKinds);
+        setCaptureKinds(savedKinds.length > 0 ? savedKinds : ["email"]);
+        setCapturePrompt(c.capturePrompt ?? "");
+        setCaptureConsentText(c.captureConsentText ?? DEFAULT_CAPTURE_CONSENT);
       })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
@@ -449,6 +474,10 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
     if (!dmMessage.trim()) return setError(t("Add the DM with the link."));
     if (openingDmEnabled && (!openingDmMessage.trim() || !openingDmButtonLabel.trim()))
       return setError(t("Your opening DM needs a message and a button label."));
+    if (captureOn && offeredCaptureKinds.length === 0)
+      return setError(t("Choose email, phone or both to ask for."));
+    if (captureOn && !captureConsentText.trim())
+      return setError(t("Add the wording people agree to when they share their details."));
 
     setSaving(true);
 
@@ -489,6 +518,10 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
       followUpEnabled,
       followUpMessage: followUpEnabled ? followUpMessage.trim() : "",
       followUpDelayMinutes: followUpEnabled ? followUpDelayMinutes : 0,
+      captureEnabled: captureOn,
+      captureKinds: captureOn ? offeredCaptureKinds : [],
+      capturePrompt: captureOn ? capturePrompt.trim() || null : null,
+      captureConsentText: captureOn ? captureConsentText.trim() : null,
       isActive: activeValue,
     };
 
@@ -1179,6 +1212,70 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
               </div>
             )}
           </div>
+          {captureAvailable && (
+            <div className="mt-3 rounded-lg border border-border p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-foreground">
+                  {t("ask for their email or phone number")}
+                </span>
+                <Toggle on={captureEnabled} onToggle={() => setCaptureEnabled(!captureEnabled)} />
+              </div>
+              {captureEnabled && (
+                <div className="mt-3 space-y-2">
+                  <div className="flex flex-wrap gap-2">
+                    {CAPTURE_KINDS.filter((kind) => support.contactCapture[kind]).map((kind) => {
+                      const checked = captureKinds.includes(kind);
+                      return (
+                        <label
+                          key={kind}
+                          className="flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm text-foreground"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() =>
+                              setCaptureKinds(
+                                checked
+                                  ? captureKinds.filter((k) => k !== kind)
+                                  : [...captureKinds, kind]
+                              )
+                            }
+                          />
+                          {kind === "email" ? t("Email") : t("Phone number")}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <textarea
+                    value={capturePrompt}
+                    onChange={(e) => setCapturePrompt(e.target.value)}
+                    placeholder={
+                      offeredCaptureKinds.length === 2
+                        ? DEFAULT_CAPTURE_PROMPT.both
+                        : DEFAULT_CAPTURE_PROMPT[offeredCaptureKinds[0] ?? "email"]
+                    }
+                    rows={2}
+                    maxLength={MAX_CAPTURE_TEXT}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
+                  />
+                  <label className="block text-xs text-muted" htmlFor="capture-consent">
+                    {t("What they agree to")}
+                  </label>
+                  <textarea
+                    id="capture-consent"
+                    value={captureConsentText}
+                    onChange={(e) => setCaptureConsentText(e.target.value)}
+                    rows={2}
+                    maxLength={MAX_CAPTURE_TEXT}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
+                  />
+                  <p className="text-xs text-muted">
+                    {t("This message goes out after the one above, but only if they've messaged you or tapped a button. They share their details in one tap. We save this wording and the time they tapped with what they shared.")}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </Section>
       </div>
 

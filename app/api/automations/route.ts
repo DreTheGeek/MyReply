@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { CAPTURE_KINDS, captureKinds, MAX_CAPTURE_TEXT } from "@/lib/campaigns/capture";
 import { getCurrentWorkspaceId } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
 import { recordAuditEvent } from "@/lib/audit";
@@ -90,6 +91,11 @@ const createAutomationSchema = z
       .optional()
       .nullable(),
     secondaryButtonLabel: z.string().max(20).optional().nullable(),
+    // Ask for an email or phone number after the campaign's message.
+    captureEnabled: z.boolean().optional().default(false),
+    captureKinds: z.array(z.enum(CAPTURE_KINDS)).max(CAPTURE_KINDS.length).optional().default([]),
+    capturePrompt: z.string().max(MAX_CAPTURE_TEXT).optional().nullable(),
+    captureConsentText: z.string().max(MAX_CAPTURE_TEXT).optional().nullable(),
     isActive: z.boolean().optional().default(true),
     wholeWordMatch: z.boolean().optional().default(true),
   })
@@ -124,7 +130,11 @@ const createAutomationSchema = z
       (Boolean(d.openingDmMessage?.trim()) &&
         Boolean(d.openingDmButtonLabel?.trim())),
     { message: "Opening DM needs a message and a button label", path: ["openingDmMessage"] }
-  );
+  )
+  .refine((d) => !d.captureEnabled || d.captureKinds.length > 0, {
+    message: "Choose email, phone or both to ask for",
+    path: ["captureKinds"],
+  });
 
 const updateAutomationSchema = z.object({
   name: z.string().min(1).max(100).optional(),
@@ -156,6 +166,10 @@ const updateAutomationSchema = z.object({
   publicReplyEnabled: z.boolean().optional(),
   publicReplyMessage: z.string().max(1000).optional().nullable(),
   publicReplyMessages: z.array(z.string().max(1000)).max(10).optional(),
+  captureEnabled: z.boolean().optional(),
+  captureKinds: z.array(z.enum(CAPTURE_KINDS)).max(CAPTURE_KINDS.length).optional(),
+  capturePrompt: z.string().max(MAX_CAPTURE_TEXT).optional().nullable(),
+  captureConsentText: z.string().max(MAX_CAPTURE_TEXT).optional().nullable(),
   isActive: z.boolean().optional(),
   wholeWordMatch: z.boolean().optional(),
   reportShareEnabled: z.boolean().optional(),
@@ -482,6 +496,14 @@ export async function POST(request: NextRequest) {
       publicReplyMessage: parsed.data.publicReplyEnabled
         ? publicReplyList[0] ?? parsed.data.publicReplyMessage ?? null
         : null,
+      captureEnabled: parsed.data.captureEnabled,
+      captureKinds: parsed.data.captureEnabled ? captureKinds(parsed.data.captureKinds) : [],
+      capturePrompt: parsed.data.captureEnabled
+        ? parsed.data.capturePrompt?.trim() || null
+        : null,
+      captureConsentText: parsed.data.captureEnabled
+        ? parsed.data.captureConsentText?.trim() || null
+        : null,
       isActive: linkReadiness.isActive,
       wholeWordMatch: parsed.data.wholeWordMatch,
       workspaceId,
@@ -591,6 +613,31 @@ export async function PATCH(request: NextRequest) {
   if (automationData.followUpEnabled === false) {
     automationData.followUpMessage = null;
     automationData.followUpDelayMinutes = 0;
+  }
+  // Turning the capture ask off clears it; turning it on needs something to
+  // ask for, judged against what the saved campaign already holds.
+  if (automationData.captureEnabled === false) {
+    automationData.captureKinds = [];
+    automationData.capturePrompt = null;
+    automationData.captureConsentText = null;
+  } else {
+    if (automationData.captureKinds !== undefined) {
+      automationData.captureKinds = captureKinds(automationData.captureKinds);
+    }
+    const enabled = automationData.captureEnabled ?? existing.captureEnabled;
+    const kinds = automationData.captureKinds ?? existing.captureKinds ?? [];
+    if (enabled && kinds.length === 0) {
+      return NextResponse.json(
+        { success: false, error: "Choose email, phone or both to ask for" },
+        { status: 400 }
+      );
+    }
+  }
+  if (automationData.capturePrompt !== undefined) {
+    automationData.capturePrompt = automationData.capturePrompt?.trim() || null;
+  }
+  if (automationData.captureConsentText !== undefined) {
+    automationData.captureConsentText = automationData.captureConsentText?.trim() || null;
   }
   // A blank ref means "no ref entry", never a campaign keyed to an empty ref.
   if (automationData.referralRef !== undefined) {

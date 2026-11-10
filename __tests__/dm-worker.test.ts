@@ -16,9 +16,13 @@ const {
   mockQueueAdd,
   mockReserveWorkspaceDMSend,
   mockReleaseWorkspaceDMReservation,
+  mockSendDirectMessageWithQuickReplies,
 } = vi.hoisted(() => ({
   mockPrisma: {
     postbackDelivery: { create: vi.fn(), delete: vi.fn() },
+    capturePrompt: { create: vi.fn(), findFirst: vi.fn(), delete: vi.fn() },
+    contactConsent: { upsert: vi.fn() },
+    $transaction: vi.fn(),
     automation: {
       findMany: vi.fn(),
       findFirst: vi.fn(),
@@ -33,11 +37,13 @@ const {
     },
     instagramAccount: {
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
     },
     // Read on every send to check whether the person replied STOP.
     contact: {
       findUnique: vi.fn(),
       upsert: vi.fn(),
+      update: vi.fn(),
     },
     operationalEvent: {
       create: vi.fn(),
@@ -57,6 +63,7 @@ const {
   mockQueueAdd: vi.fn(),
   mockReserveWorkspaceDMSend: vi.fn(),
   mockReleaseWorkspaceDMReservation: vi.fn(),
+  mockSendDirectMessageWithQuickReplies: vi.fn(),
 }));
 
 vi.mock("@/lib/db/client", () => ({
@@ -74,6 +81,7 @@ vi.mock("@/lib/meta/client", async (importOriginal) => ({
   sendDirectMessageWithButton: mockSendDirectMessageWithButton,
   sendDirectMessage: mockSendDirectMessage,
   sendDirectMessageWithLinkButton: mockSendDirectMessageWithLinkButton,
+  sendDirectMessageWithQuickReplies: mockSendDirectMessageWithQuickReplies,
   sendCommentReply: vi.fn(),
   MetaApiError: class MetaApiError extends Error {
     code: number;
@@ -325,6 +333,17 @@ beforeEach(() => {
     message_id: "msg_006",
   });
   mockGetUserFollowStatus.mockResolvedValue(true);
+  mockSendDirectMessageWithQuickReplies.mockReset().mockResolvedValue({
+    recipient_id: "commenter_999",
+    message_id: "msg_007",
+  });
+  mockPrisma.capturePrompt.create.mockReset().mockResolvedValue({ id: "prompt_1" });
+  mockPrisma.capturePrompt.findFirst.mockReset().mockResolvedValue(null);
+  mockPrisma.capturePrompt.delete.mockReset().mockResolvedValue({});
+  mockPrisma.contactConsent.upsert.mockReset().mockResolvedValue({});
+  mockPrisma.contact.update.mockReset().mockResolvedValue({});
+  mockPrisma.instagramAccount.findFirst.mockReset().mockResolvedValue(null);
+  mockPrisma.$transaction.mockReset().mockImplementation(async (ops: unknown[]) => ops);
 });
 
 describe("DM Worker, comments left on an ad", () => {
@@ -1992,4 +2011,163 @@ it("retains the public reply claim if sending succeeded but its log write failed
   await process({ ...createMockJob(), id: "next-poll" });
   expect(sendCommentReply).toHaveBeenCalledTimes(1);
   expect(mockSendPrivateReply).toHaveBeenCalledTimes(1);
+});
+
+describe("DM Worker, asking for an email or phone number", () => {
+  const captureAutomation = {
+    ...mockAutomation,
+    dmTriggerEnabled: true,
+    requireFollow: false,
+    captureEnabled: true,
+    captureKinds: ["email"],
+    capturePrompt: "Want the price list by email?",
+    captureConsentText: "We will only email you about lash bookings.",
+  };
+
+  function messageJob(data: Record<string, unknown> = {}) {
+    return {
+      name: "process-message",
+      data: {
+        instagramAccountId: "ig_456",
+        messageId: "mid_cap",
+        messageText: "LINK",
+        senderId: "commenter_999",
+        receivedAt: new Date().toISOString(),
+        ...data,
+      },
+      id: "message_job_cap",
+      attemptsMade: 0,
+    };
+  }
+
+  beforeEach(() => {
+    returnAutomationRespectingTriggers(captureAutomation);
+  });
+
+  it("sends the ask after the campaign's message, with the consent wording, recorded first", async () => {
+    await getProcessor()(messageJob());
+
+    expect(mockSendDirectMessage).toHaveBeenCalledTimes(1);
+    expect(mockSendDirectMessageWithQuickReplies).toHaveBeenCalledWith(
+      "decrypted_token",
+      "ig_456",
+      "commenter_999",
+      "Want the price list by email?\n\nWe will only email you about lash bookings.",
+      [{ type: "email", title: "Email" }]
+    );
+    expect(mockPrisma.capturePrompt.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          workspaceId: "workspace_123",
+          instagramAccountId: "ig_account_row_1",
+          automationId: "auto_789",
+          recipientExternalId: "commenter_999",
+          kinds: ["EMAIL"],
+          consentText: "We will only email you about lash bookings.",
+        },
+      })
+    );
+    expect(mockPrisma.capturePrompt.create.mock.invocationCallOrder[0]).toBeLessThan(
+      mockSendDirectMessageWithQuickReplies.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("asks nothing when the campaign does not ask", async () => {
+    returnAutomationRespectingTriggers({ ...captureAutomation, captureEnabled: false });
+    await getProcessor()(messageJob());
+    expect(mockSendDirectMessageWithQuickReplies).not.toHaveBeenCalled();
+    expect(mockPrisma.capturePrompt.create).not.toHaveBeenCalled();
+  });
+
+  it("a failed ask never fails the job, and its record is removed", async () => {
+    mockSendDirectMessageWithQuickReplies.mockRejectedValue(new Error("boom"));
+    await expect(getProcessor()(messageJob())).resolves.toBeUndefined();
+    expect(mockSendDirectMessage).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.capturePrompt.delete).toHaveBeenCalledWith({ where: { id: "prompt_1" } });
+  });
+
+  it("an ask that cannot be recorded is not sent", async () => {
+    mockPrisma.capturePrompt.create.mockRejectedValue(new Error("db down"));
+    await getProcessor()(messageJob());
+    expect(mockSendDirectMessage).toHaveBeenCalledTimes(1);
+    expect(mockSendDirectMessageWithQuickReplies).not.toHaveBeenCalled();
+  });
+
+  describe("a tap on the email button", () => {
+    const tappedAt = new Date("2026-11-10T12:00:00.000Z");
+    const tap = (payload: string) =>
+      messageJob({
+        messageId: "mid_tap",
+        messageText: payload,
+        quickReplyPayload: payload,
+        receivedAt: tappedAt.toISOString(),
+      });
+
+    beforeEach(() => {
+      mockPrisma.instagramAccount.findFirst.mockResolvedValue({
+        id: "ig_account_row_1",
+        workspaceId: "workspace_123",
+      });
+      mockPrisma.contact.upsert.mockResolvedValue({ id: "contact_1" });
+    });
+
+    it("records the detail with the wording that was shown and the time of the tap", async () => {
+      mockPrisma.capturePrompt.findFirst.mockResolvedValue({
+        id: "prompt_1",
+        automationId: "auto_789",
+        consentText: "We will only email you about lash bookings.",
+      });
+
+      await getProcessor()(tap("Ana@Example.com"));
+
+      const lookup = mockPrisma.capturePrompt.findFirst.mock.calls[0][0];
+      expect(lookup.where).toMatchObject({
+        instagramAccountId: "ig_account_row_1",
+        recipientExternalId: "commenter_999",
+        kinds: { has: "EMAIL" },
+      });
+      expect(lookup.where.sentAt.gte.getTime()).toBe(
+        tappedAt.getTime() - 7 * 24 * 60 * 60 * 1000
+      );
+
+      expect(mockPrisma.contactConsent.upsert).toHaveBeenCalledWith({
+        where: {
+          contactId_sourceMessageId: { contactId: "contact_1", sourceMessageId: "mid_tap" },
+        },
+        create: {
+          workspaceId: "workspace_123",
+          contactId: "contact_1",
+          automationId: "auto_789",
+          kind: "EMAIL",
+          value: "ana@example.com",
+          consentText: "We will only email you about lash bookings.",
+          consentedAt: tappedAt,
+          sourceMessageId: "mid_tap",
+        },
+        // A retried webhook finds the row and changes nothing.
+        update: {},
+      });
+      expect(mockPrisma.contact.update).toHaveBeenCalledWith({
+        where: { id: "contact_1" },
+        data: { email: "ana@example.com" },
+      });
+      // An email address is not a keyword: nothing is sent back.
+      expect(mockPrisma.automation.findMany).not.toHaveBeenCalled();
+      expect(mockSendDirectMessage).not.toHaveBeenCalled();
+    });
+
+    it("stores nothing when we never asked", async () => {
+      await getProcessor()(tap("ana@example.com"));
+      expect(mockPrisma.contactConsent.upsert).not.toHaveBeenCalled();
+      expect(mockPrisma.contact.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: { email: "ana@example.com" } })
+      );
+    });
+
+    it("stores nothing for a payload that is not an email or phone number", async () => {
+      await getProcessor()(tap("reveal:auto_789"));
+      expect(mockPrisma.capturePrompt.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.contactConsent.upsert).not.toHaveBeenCalled();
+    });
+  });
 });

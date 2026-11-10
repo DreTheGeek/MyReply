@@ -437,6 +437,10 @@ export async function runMcpTool(
           publicReplyEnabled: true,
           publicReplyMessage: true,
           publicReplyMessages: true,
+          captureEnabled: true,
+          captureKinds: true,
+          capturePrompt: true,
+          captureConsentText: true,
           createdAt: true,
           updatedAt: true,
           trackedLinks: {
