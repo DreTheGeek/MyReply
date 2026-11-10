@@ -1,9 +1,9 @@
-# OpenReply — self-hosted Docker image
+# OpenReply, self-hosted Docker image
 #
 # Two runtime processes ship from this image:
 #   - web:    `npm run start`  → next start (needs .next + node_modules)
 #   - worker: `npm run worker` → tsx worker/dm-worker.ts (runs RAW TypeScript,
-#             not a bundled output — needs the generated Prisma client, the
+#             not a bundled output, needs the generated Prisma client, the
 #             full source tree under lib/ and worker/, and tsconfig.json for
 #             the `@/*` path alias tsx resolves at runtime)
 #   - cron:   `sh scripts/cron.sh` → the scheduler for /api/cron, which nothing
@@ -11,7 +11,7 @@
 #             in the image and wget on PATH; node:20-slim ships neither.
 #
 # next.config.ts does not set `output: "standalone"`, so `next start` already
-# requires the full node_modules tree at runtime — there is no slimmer
+# requires the full node_modules tree at runtime, there is no slimmer
 # standalone bundle to fall back to here. Given that, this Dockerfile does
 # NOT try to strip node_modules/tsconfig.json/source files out of the final
 # stage: doing so is exactly what breaks the worker (MODULE_NOT_FOUND on
@@ -25,7 +25,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
-# `npm run build` = `prisma generate && next build` (see package.json) —
+# `npm run build` = `prisma generate && next build` (see package.json),
 # generates app/generated/prisma AND compiles .next/ in one step.
 RUN npm run build
 
@@ -53,7 +53,7 @@ COPY --from=build /app/tsconfig.json ./tsconfig.json
 COPY --from=build /app/package.json ./package.json
 
 EXPOSE 3000
-# Default to the web process — the worker service overrides this with
+# Default to the web process, the worker service overrides this with
 # `command: ["npm", "run", "worker"]` in whatever compose/stack file deploys
 # it (see openreply-vps.stack.yml in EvolutionAPI/omni-nexus for an example).
 CMD ["npm", "run", "start"]

@@ -35,6 +35,6 @@ export function writeCache<T>(key: string, data: T): void {
       JSON.stringify({ data, ts: Date.now() })
     );
   } catch {
-    // Storage full or unavailable — caching is best-effort.
+    // Storage full or unavailable, caching is best-effort.
   }
 }

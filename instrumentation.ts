@@ -87,12 +87,12 @@ export function register(): void {
   for (const expected of EXPECTED) {
     const value = process.env[expected.name];
     if (!value || value.trim() === "") {
-      missing.push(`${expected.name} — without it, ${expected.breaks}`);
+      missing.push(`${expected.name}, without it, ${expected.breaks}`);
       continue;
     }
     if (expected.valid && !expected.valid(value)) {
       malformed.push(
-        `${expected.name} is set but the wrong shape — ${expected.breaks}`
+        `${expected.name} is set but the wrong shape, ${expected.breaks}`
       );
     }
   }

@@ -1,5 +1,5 @@
 /**
- * Keyword Matcher — Unit Tests
+ * Keyword Matcher, Unit Tests
  *
  * Tests all edge cases for keyword matching logic.
  */
@@ -50,7 +50,7 @@ describe("stripSpecialCharacters", () => {
   });
 });
 
-describe("matchKeywords — whole word matching", () => {
+describe("matchKeywords, whole word matching", () => {
   it("should match exact keyword (case-insensitive)", () => {
     const result = matchKeywords("I want the LINK", ["link"], true);
     expect(result.matched).toBe(true);
@@ -97,7 +97,7 @@ describe("matchKeywords — whole word matching", () => {
   });
 });
 
-describe("matchKeywords — non-Latin scripts", () => {
+describe("matchKeywords, non-Latin scripts", () => {
   it("should match a Cyrillic keyword in whole-word mode", () => {
     const result = matchKeywords("Клод", ["Клод"], true);
     expect(result.matched).toBe(true);
@@ -130,7 +130,7 @@ describe("matchKeywords — non-Latin scripts", () => {
   });
 });
 
-describe("matchKeywords — partial matching", () => {
+describe("matchKeywords, partial matching", () => {
   it("should match partial words in partial mode", () => {
     const result = matchKeywords("I am linking to you", ["link"], false);
     expect(result.matched).toBe(true);
@@ -148,9 +148,9 @@ describe("matchKeywords — partial matching", () => {
   });
 });
 
-describe("matchKeywords — numeric keyword / letter-O homoglyph", () => {
+describe("matchKeywords, numeric keyword / letter-O homoglyph", () => {
   // Production bug: a "08" campaign never fired for a real commenter who
-  // typed "O8" (capital letter O, not the digit zero) — visually identical
+  // typed "O8" (capital letter O, not the digit zero), visually identical
   // on most fonts, and mobile autocapitalize compounds it on a leading "o".
   // matchKeywords silently returned unmatched, indistinguishable from any
   // other non-matching comment, so nothing surfaced until someone reported
@@ -174,7 +174,7 @@ describe("matchKeywords — numeric keyword / letter-O homoglyph", () => {
   });
 
   it("does not fold O/0 for a non-numeric (word) keyword", () => {
-    // "gordo" contains "o", but the keyword "adoro" is a word, not a number —
+    // "gordo" contains "o", but the keyword "adoro" is a word, not a number,
     // the fold must never apply here.
     expect(matchKeywords("eu gordo", ["adoro"], true).matched).toBe(false);
   });
@@ -185,7 +185,7 @@ describe("matchKeywords — numeric keyword / letter-O homoglyph", () => {
   });
 });
 
-describe("matchKeywords — edge cases", () => {
+describe("matchKeywords, edge cases", () => {
   it("should return false for empty comment text", () => {
     const result = matchKeywords("", ["link"], true);
     expect(result.matched).toBe(false);
@@ -258,7 +258,7 @@ describe("foldDiacritics", () => {
   });
 });
 
-describe("matchKeywords — diacritics", () => {
+describe("matchKeywords, diacritics", () => {
   it("should match an accented comment against an unaccented keyword", () => {
     expect(matchKeywords("PREÇO?", ["preco"], true).matched).toBe(true);
     expect(matchKeywords("ÍNDICE", ["indice"], true).matched).toBe(true);

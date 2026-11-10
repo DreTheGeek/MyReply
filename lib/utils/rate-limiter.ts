@@ -115,7 +115,7 @@ export async function checkRateLimit(
   if (count >= RATE_LIMIT_MAX) {
     // Over the limit
     if (requeueAttempt >= MAX_REQUEUE_ATTEMPTS) {
-      // Exceeded max requeue attempts — skip this DM
+      // Exceeded max requeue attempts, skip this DM
       return {
         allowed: false,
         currentCount: count,

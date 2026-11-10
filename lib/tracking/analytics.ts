@@ -39,7 +39,7 @@ function getCount(value: StatusCountRow["_count"] | KeywordCountRow["_count"]) {
 export function calculateCtr(clicks: number, sent: number) {
   if (sent <= 0) return 0;
   // Clicks are unique per recipient, but IP-counted clicks (older links, links
-  // opened from a public reply or forwarded) can still exceed sends — cap it so
+  // opened from a public reply or forwarded) can still exceed sends, cap it so
   // CTR stays sane.
   return Math.min(100, Number(((clicks / sent) * 100).toFixed(1)));
 }

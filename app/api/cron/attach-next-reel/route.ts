@@ -9,7 +9,7 @@ import { attachPendingNextReels } from "@/lib/automation/attach-next-reel";
  * every campaign awaiting the creator's next reel, find the earliest reel that
  * was posted after the campaign was created and attach the campaign to it.
  * Runs on a schedule (Supabase pg_cron, see docs/cron.md), and on every
- * worker poll — the campaign goes live within one
+ * worker poll, the campaign goes live within one
  * cron interval of the reel being posted.
  */
 

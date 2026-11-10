@@ -59,7 +59,7 @@ export interface ProcessCommentJob {
   source?: CommentSource;
 }
 
-// Delivered when a user taps an opening DM's button — carries the reveal target.
+// Delivered when a user taps an opening DM's button, carries the reveal target.
 export interface ProcessPostbackJob {
   accountConnectionId?: string;
   instagramAccountId: string;

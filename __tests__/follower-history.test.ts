@@ -1,5 +1,5 @@
 /**
- * Follower History — Unit Tests
+ * Follower History, Unit Tests
  *
  * Covers the reconstruction of absolute follower totals from the daily
  * net-change deltas that Instagram's follower_count insight returns.

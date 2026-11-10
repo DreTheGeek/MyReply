@@ -318,7 +318,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
 
   // Track which posts on the selected account are already assigned to an
   // automation, so the picker can highlight them. The campaign being edited is
-  // excluded — its own post should read as selected, not "taken".
+  // excluded, its own post should read as selected, not "taken".
   useEffect(() => {
     if (!selectedAccountId) return;
     let cancelled = false;
@@ -494,7 +494,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
       const data = await res.json();
       if (data.success) {
         // The post we just assigned is now in use. Reflect it immediately so
-        // the picker flags it on the next imported row — the fetch that builds
+        // the picker flags it on the next imported row, the fetch that builds
         // this map doesn't re-run while the builder stays mounted through the
         // import queue.
         if (triggerScope === "specific" && postId) {
@@ -569,7 +569,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
       if (typeof window !== "undefined") window.scrollTo({ top: 0 });
       return;
     }
-    // Last row skipped — finish the import.
+    // Last row skipped, finish the import.
     try {
       window.localStorage.removeItem(IMPORT_QUEUE_KEY);
       window.localStorage.removeItem(IMPORT_ACCOUNT_KEY);
@@ -606,7 +606,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
             {t("Importing {current} of {total}.", { current: importTotal - importQueue.length + 1, total: importTotal })}
           </span>{" "}
           <span className="text-muted">
-            {t("Fields are prefilled from your CSV. Pick the reel, edit anything, and save to load the next one — or Skip if you don’t want this one.")}
+            {t("Fields are prefilled from your CSV. Pick the reel, edit anything, and save to load the next one, or Skip if you don’t want this one.")}
           </span>
         </div>
       )}
@@ -812,7 +812,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
           {dmTriggerEnabled && (
             <p className="text-xs text-muted">
               {matchMode === "any"
-                ? t("Every DM to this account gets the reply below — use with care.")
+                ? t("Every DM to this account gets the reply below. Use with care.")
                 : t("A DM containing any of these words gets the same reply, no comment needed.")}
             </p>
           )}

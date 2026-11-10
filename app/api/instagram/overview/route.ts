@@ -76,7 +76,7 @@ export interface OverviewResponse {
   /** Current follower total, or null if Instagram did not return it. */
   followers: number | null;
   /**
-   * Follower total per day, ascending. Independent of the selected post range —
+   * Follower total per day, ascending. Independent of the selected post range,
    * limited to what has been snapshotted plus any 30-day insights backfill.
    */
   followerHistory: FollowerHistoryPoint[];

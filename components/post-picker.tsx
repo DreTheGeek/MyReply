@@ -50,7 +50,7 @@ export default function PostPicker({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  // The post currently hovered — its video (if it's a reel) plays a preview.
+  // The post currently hovered, its video (if it's a reel) plays a preview.
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   // The grid loads the whole library (all=true). On accounts with hundreds of
   // posts, rendering every tile at once is enough to make mobile Safari drop

@@ -18,7 +18,7 @@ import FollowerChart from "@/components/follower-chart";
 import type { OverviewResponse } from "@/app/api/instagram/overview/route";
 
 function formatNumber(n: number | null, locale: Locale): string {
-  if (n === null) return "—";
+  if (n === null) return "-";
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return n.toLocaleString(locale);
@@ -116,7 +116,7 @@ export default function OverviewPage() {
         <div className="min-w-0">
           <h1 className="text-lg font-semibold text-foreground">{t("Overview")}</h1>
           <p className="text-sm text-muted mt-1">
-            {data.provider !== "ZERNIO" && data.requestedCount === "all" ? t("All-time") : t("Recent")} —{" "}
+            {data.provider !== "ZERNIO" && data.requestedCount === "all" ? t("All-time") : t("Recent")}, {" "}
             {t(totals.posts === 1 ? "{count} post" : "{count} posts", { count: totals.posts })} {t("from @")}
             {data.account.username}
             {data.truncated ? t(" (capped at {count})", { count: totals.posts }) : ""}
@@ -166,7 +166,7 @@ export default function OverviewPage() {
             {t("Views, reach, saved and shares need the insights permission.")}
           </p>
           <p className="text-sm text-muted mt-1">
-            {t("Reconnect your account to grant it — likes and comments are shown in the meantime.")}
+            {t("Reconnect your account to grant it. Likes and comments are shown in the meantime.")}
           </p>
           <a
             href="/api/instagram/connect"

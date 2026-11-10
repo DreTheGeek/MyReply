@@ -3,7 +3,7 @@
 #
 # On Vercel these run from the "crons" block in vercel.json. Nothing reads that
 # file anywhere else, so a self-hosted instance has no scheduler at all and the
-# jobs simply never run — silently. The one that hurts is refresh-tokens: the
+# jobs simply never run, silently. The one that hurts is refresh-tokens: the
 # Instagram token expires and every automation stops without a single error.
 #
 # Run as its own container from the app image (see the compose file), so the
@@ -17,7 +17,7 @@ BASE_URL="${CRON_BASE_URL:-http://web:3000}"
 SECRET="${CRON_SECRET:-${NEXTAUTH_SECRET:-}}"
 
 if [ -z "$SECRET" ]; then
-  echo "[cron] neither CRON_SECRET nor NEXTAUTH_SECRET is set — the routes would answer 401" >&2
+  echo "[cron] neither CRON_SECRET nor NEXTAUTH_SECRET is set, the routes would answer 401" >&2
   exit 1
 fi
 
@@ -60,7 +60,7 @@ while true; do
   esac
 
   # Once a day, early: the token refresh has a 10-day window before expiry, so
-  # the exact hour does not matter — only that it happens every day.
+  # the exact hour does not matter, only that it happens every day.
   if [ "$hour" = "05" ] && [ "$last_daily" != "$today" ]; then
     last_daily="$today"
     call refresh-tokens

@@ -12,7 +12,7 @@
  *   1. the comment matches the campaign keyword, and
  *   2. the account owner has not already replied to it.
  * The reply check reads the comment's actual replies on Instagram, so a comment
- * you (or the tool) already answered is skipped — the poll never re-touches
+ * you (or the tool) already answered is skipped, the poll never re-touches
  * handled comments. Each sweep is capped so it can never flood the comment API
  * (which Instagram rate-limits aggressively, error 368).
  *
@@ -41,7 +41,7 @@ import {
 } from "@/lib/instagram/provider";
 import { matchKeywords } from "@/lib/utils/keyword-matcher";
 
-// Only consider comments from the last few days — older ones are outside
+// Only consider comments from the last few days, older ones are outside
 // Instagram's private-reply window anyway, so a DM to them would just fail.
 const LOOKBACK_HOURS = Number(process.env.COMMENT_POLL_LOOKBACK_HOURS ?? 72);
 // Hard cap on how many new comments a single campaign can enqueue per sweep, so
@@ -324,7 +324,7 @@ async function sweepCampaign({
     // Second guard against races: skip comments this campaign has already fully
     // handled. "Fully handled" depends on the campaign: if it posts a public
     // reply, the completion signal is publicReplySentAt (a DM alone is not
-    // enough — the reply still has to land); otherwise a SENT DM is enough. This
+    // enough, the reply still has to land); otherwise a SENT DM is enough. This
     // is what lets a comment whose DM sent but whose public reply failed come
     // back and retry the reply.
     const logs = await prisma.dmLog.findMany({
@@ -390,7 +390,7 @@ async function sweepCampaign({
  * Boosting a post gives it a second media id: comments left on the ad arrive
  * with the ad's `media.id` and the post's id in `original_media_id`. The sweep
  * would otherwise only ever look at the post itself, so a comment Meta fails to
- * deliver on the ad is lost for good — exactly the case this safety net exists
+ * deliver on the ad is lost for good, exactly the case this safety net exists
  * for, and the one where volume is highest.
  *
  * The ad ids are recovered from the webhooks themselves rather than from the

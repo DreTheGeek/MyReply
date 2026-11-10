@@ -211,7 +211,7 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     await releaseWorkspaceDMReservation(context.workspaceId, usage.periodStart);
     console.error("[Conversations] Send error:", err);
-    // Surface Meta's own message — the common case is the 24-hour messaging
+    // Surface Meta's own message, the common case is the 24-hour messaging
     // window having closed, which the user needs to see explicitly.
     const message =
       err instanceof MetaApiError ? err.message : "Failed to send message";

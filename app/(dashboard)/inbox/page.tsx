@@ -6,7 +6,7 @@
  * Instagram DM conversations for the selected account, with live message
  * history and a reply composer. Messages are read from the Conversations API
  * (Meta only exposes the 20 most recent per thread) and refreshed by polling.
- * Sending is subject to Instagram's 24-hour messaging window — Meta's error is
+ * Sending is subject to Instagram's 24-hour messaging window, Meta's error is
  * surfaced verbatim when it applies.
  */
 

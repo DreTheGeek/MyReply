@@ -1,5 +1,5 @@
 /**
- * Webhook — Unit Tests
+ * Webhook, Unit Tests
  *
  * Tests signature verification and comment event parsing.
  */

@@ -106,7 +106,7 @@ If you use Claude Code, Cursor, or a similar tool, an assistant can walk you thr
 - Tailwind CSS for the interface
 - The official Instagram API with Instagram Login
 
-For the complete stack — application libraries, the two runtime processes, and the free services this runs on (Vercel, Neon, Redis Cloud, an Oracle Cloud always-free VM for the worker, Resend, Meta) — see [docs/stack.md](docs/stack.md).
+For the complete stack, application libraries, the two runtime processes, and the free services this runs on (Vercel, Neon, Redis Cloud, an Oracle Cloud always-free VM for the worker, Resend, Meta), see [docs/stack.md](docs/stack.md).
 
 ## Contributing
 

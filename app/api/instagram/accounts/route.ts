@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db/client";
 export const runtime = "nodejs";
 
 /**
- * The workspace's connected Instagram accounts — just enough for an account
+ * The workspace's connected Instagram accounts, just enough for an account
  * selector. This is a single indexed query, unlike /api/dashboard/stats which
  * runs the full analytics aggregation. Pages that only need the account list
  * (e.g. the inbox) should use this so they aren't gated on heavy stats.

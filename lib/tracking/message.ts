@@ -35,7 +35,7 @@ export function replaceUrlWithTrackedPlaceholder(
 }
 
 /**
- * Personalize {username} and strip the {link} token — used when the link is
+ * Personalize {username} and strip the {link} token, used when the link is
  * delivered as a separate button rather than inline in the message text.
  */
 export function renderMessageWithoutLink({

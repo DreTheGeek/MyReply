@@ -113,7 +113,7 @@ export default function CommentHeatmap({
                     return (
                       <div
                         key={`${day}-${hour}`}
-                        title={`${day} ${hourLabel(hour)} — ${value} comment${value === 1 ? "" : "s"}`}
+                        title={`${day} ${hourLabel(hour)}, ${value} comment${value === 1 ? "" : "s"}`}
                         className="h-4 rounded-[1px]"
                         style={{
                           backgroundColor:

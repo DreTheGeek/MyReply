@@ -36,7 +36,7 @@ export interface KeywordMatchResult {
  * keyboard, and harakat are optional vocalisation almost nobody types. Without
  * this step an Iranian account keyed on "لینک" misses every commenter whose
  * phone sends the Arabic yeh and kaf (U+064A / U+0643) instead of the Persian
- * ones (U+06CC / U+06A9) — the two strings look identical on screen and never
+ * ones (U+06CC / U+06A9), the two strings look identical on screen and never
  * compare equal. The same holds for "کد۵" against a "کد5" keyword.
  *
  * Applied to both sides of the comparison, so it never matters which form the
@@ -57,7 +57,7 @@ const ARABIC_SCRIPT_FOLDING: Array<[RegExp, string]> = [
   // ZWNJ is a rendering hint and half of Instagram types it while half does
   // not, so "قیمت‌ها" and "قیمتها" have to compare equal. Deleted rather than
   // turned into a space, because the no-separator spelling is the fallback
-  // people actually type. Bidi marks go with it — they carry no meaning.
+  // people actually type. Bidi marks go with it, they carry no meaning.
   [/[‌‎‏]/gu, ""],
 ];
 
@@ -78,7 +78,7 @@ export function normalizeArabicScript(text: string): string {
 
 /**
  * A trigger keyword that is purely digits (optionally mixed with the letter
- * "o"/"O", the character it gets confused with) — e.g. "08", "17".
+ * "o"/"O", the character it gets confused with), e.g. "08", "17".
  */
 function isNumericLikeKeyword(cleanedKeyword: string): boolean {
   return /^[0-9oO]+$/.test(cleanedKeyword);
@@ -86,7 +86,7 @@ function isNumericLikeKeyword(cleanedKeyword: string): boolean {
 
 /**
  * Fold the letter O into the digit 0. Commenters routinely type "O8" for a
- * "08" trigger word — same glyph on most fonts, and mobile autocapitalize
+ * "08" trigger word, same glyph on most fonts, and mobile autocapitalize
  * turns a leading "o" into "O" on top of that. Confirmed in production: a
  * numeric campaign keyword silently dropped every comment spelled with the
  * letter instead of the digit, with no error anywhere (matchKeywords just
@@ -192,7 +192,7 @@ export function matchKeywords(
 
     if (!cleanedKeyword) continue;
 
-    // Only numeric-like keywords get the O/0 fold — a word keyword compares
+    // Only numeric-like keywords get the O/0 fold, a word keyword compares
     // exactly as before.
     const numericLike = isNumericLikeKeyword(cleanedKeyword);
     const compareText = numericLike

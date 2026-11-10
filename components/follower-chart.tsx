@@ -7,7 +7,7 @@
  * from the Overview stat tiles: those sum the selected posts, while this is an
  * account-level total that ignores the post range.
  *
- * History depth is limited by what has been snapshotted — Instagram only serves
+ * History depth is limited by what has been snapshotted, Instagram only serves
  * ~30 days of account insights, so earlier days exist only if this instance was
  * already running then.
  */
@@ -140,7 +140,7 @@ export default function FollowerChart({
             {data.length === 0
               ? t("No snapshots recorded yet.")
               : t("One day recorded so far.")}{" "}
-            {t("A point is added daily — the chart appears once there are at least two.")}
+            {t("A point is added daily. The chart appears once there are at least two.")}
           </p>
         </div>
       ) : showTable ? (
@@ -163,7 +163,7 @@ export default function FollowerChart({
                     {p.followers.toLocaleString(locale)}
                   </td>
                   <td className="py-2 pl-3 text-right text-muted">
-                    {p.delta === null ? "—" : formatSigned(p.delta, locale)}
+                    {p.delta === null ? "-" : formatSigned(p.delta, locale)}
                   </td>
                 </tr>
               ))}

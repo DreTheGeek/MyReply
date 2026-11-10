@@ -21,14 +21,14 @@ For the step-by-step setup, see [setup.md](setup.md).
 | Worker runtime | `tsx` (runs `worker/dm-worker.ts`) |
 | Instagram | Official Meta Graph API (Instagram Login) |
 
-## Runtime — two processes, two datastores
+## Runtime, two processes, two datastores
 
 - **Web app + API** (`npm run dev` / `npm start`): Next.js. Serves the dashboard,
   the OAuth callback, and the incoming webhook. Serverless-friendly; runs on Vercel.
 - **Worker** (`npm run worker`): a long-running Node process. Consumes the send
   queue, sends the DMs, runs the polling reconciler, and performs the follow-gate
   `is_user_follow_business` checks. **Must stay always-on**, so it cannot run on
-  Vercel — it needs an always-on host.
+  Vercel, it needs an always-on host.
 - **PostgreSQL**: campaigns, DM logs, accounts, sessions, tracked links, click events.
 - **Redis**: the BullMQ send queue and the per-account rate limiter. Must speak the
   native Redis protocol over TCP (an HTTP-only Redis will not work with BullMQ).
@@ -53,7 +53,7 @@ worker + Postgres + Redis) are covered in [setup.md](setup.md).
 
 ## Environment variables
 
-Names only — values live in `.env` (gitignored) or the host's env settings, never
+Names only, values live in `.env` (gitignored) or the host's env settings, never
 in the repo. Full descriptions are in [setup.md](setup.md#environment-variables).
 
 `NEXTAUTH_URL`, `NEXTAUTH_SECRET`, `CRON_SECRET`, `ENCRYPTION_KEY`, `DATABASE_URL`,

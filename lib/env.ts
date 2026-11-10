@@ -41,7 +41,7 @@ export function getMissingInstagramOAuthEnv(): string[] {
     const value = process.env[name];
     if (!value) return true;
     // A malformed key fails later inside encryptToken, after the user has
-    // already round-tripped through Meta — catch the bad format here instead.
+    // already round-tripped through Meta, catch the bad format here instead.
     return name === "ENCRYPTION_KEY" && !HEX_32_BYTE.test(value);
   });
 }

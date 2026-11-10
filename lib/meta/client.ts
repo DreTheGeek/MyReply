@@ -29,7 +29,7 @@ export class MetaApiError extends Error {
 // These subclasses carry the subcode and the code Meta actually sent. The
 // subcode is the only thing that separates a permanent rejection (a comment
 // not eligible for a private reply, sub=2534025) from one worth retrying, and
-// the fixed code made a 10 or a 200 arrive as a 100 — which is what
+// the fixed code made a 10 or a 200 arrive as a 100, which is what
 // `isTemplateRejection` in the DM worker tests for before it tries another
 // send. Both arguments default to the previous values, so existing call sites
 // are unaffected.
@@ -76,13 +76,13 @@ interface GraphApiError {
 
 export interface InstagramUser {
   id: string;
-  // Instagram professional account ID. This — not `id` (the app-scoped ID) —
+  // Instagram professional account ID. This, not `id` (the app-scoped ID),
   // is what appears as entry.id in webhooks and is used by the messaging API.
   user_id?: string;
   username: string;
   name?: string;
   profile_picture_url?: string;
-  // Current follower total. Point-in-time only — Instagram exposes no history
+  // Current follower total. Point-in-time only, Instagram exposes no history
   // for this field, so long-run trends come from FollowerSnapshot instead.
   followers_count?: number;
 }
@@ -144,7 +144,7 @@ export async function handleResponse<T>(response: Response): Promise<T> {
     const traceId = err?.fbtrace_id;
     // Without the path a Meta error is unattributable: a connect runs several
     // calls in a row that fail with the identical message. The query string is
-    // dropped on purpose — it carries the access token.
+    // dropped on purpose, it carries the access token.
     let path = "";
     try {
       path = ` (${new URL(response.url).pathname})`;
@@ -195,7 +195,7 @@ export async function sendPrivateReply(
 }
 
 /**
- * Send a private reply to a comment as a button template — an opening message
+ * Send a private reply to a comment as a button template, an opening message
  * plus a postback button. Tapping the button opens the conversation and fires
  * a `messaging_postbacks` webhook carrying `payload`, which we use to deliver
  * the follow-up ("reveal") message.
@@ -284,7 +284,7 @@ export async function sendDirectMessageWithButton(
  * Check whether a user (by their IGSID) follows the business account, via the
  * Instagram Messaging profile API. Available for users in an active
  * conversation (e.g. after a private reply or a button tap). Returns true or
- * false, or `null` when Meta does not return the field — so callers can decide
+ * false, or `null` when Meta does not return the field, so callers can decide
  * how to treat the unverifiable case.
  */
 export async function getUserFollowStatus(
@@ -357,7 +357,7 @@ function toWebUrlButtons(buttons: LinkButton[]) {
 
 /**
  * Send a private reply to a comment as a button template with up to 3 web_url
- * buttons — the reveal message plus tappable link buttons (for campaigns with
+ * buttons, the reveal message plus tappable link buttons (for campaigns with
  * no opening DM, where the reveal is delivered straight to the comment).
  */
 export async function sendPrivateReplyWithLinkButton(
@@ -559,7 +559,7 @@ export async function sendPrivateReplyWithQuickReplies(
 }
 
 /**
- * Send a direct message as a button template with up to 3 web_url buttons —
+ * Send a direct message as a button template with up to 3 web_url buttons,
  * the reveal message plus tappable link buttons (cleaner than inline URLs).
  */
 export async function sendDirectMessageWithLinkButton(
@@ -633,7 +633,7 @@ export async function getMediaComments(
  * Recent comments on a media, newest first, each with its replies so the caller
  * can tell whether the account owner has already responded. Pagination stops as
  * soon as it reaches comments older than `sinceMs` (or the `max` ceiling), so a
- * viral post's entire back-catalogue is never pulled — only what is recent
+ * viral post's entire back-catalogue is never pulled, only what is recent
  * enough to still act on. This is what the polling reconciler reads.
  *
  * Note: comments hidden by Instagram's Hidden Words / spam filter may not be
@@ -876,7 +876,7 @@ export async function getAllUserMedia(
 /**
  * Fetch per-media insight metrics (views, reach, saved, shares, etc.).
  *
- * Requires the `instagram_business_manage_insights` permission — accounts
+ * Requires the `instagram_business_manage_insights` permission, accounts
  * connected before that scope was requested will throw a PermissionError.
  * Metric validity varies by media type, so pass only metrics that apply to
  * the given media (e.g. `views` is not valid for image posts on some accounts).
@@ -921,7 +921,7 @@ const FOLLOWER_INSIGHT_MAX_DAYS = 30;
  * Requires `instagram_business_manage_insights`. Note this metric is *not*
  * universally available: Instagram omits it for accounts under 100 followers
  * and it is unsupported on some account types. Callers must treat `null` as
- * "no series available" rather than an error — see the backfill in
+ * "no series available" rather than an error, see the backfill in
  * `lib/reports/follower-history.ts`.
  *
  * Returns daily deltas, not running totals. Reconstruct absolute counts by

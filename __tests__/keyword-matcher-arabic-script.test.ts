@@ -1,5 +1,5 @@
 /**
- * Keyword Matcher — Arabic-script (Persian / Arabic / Urdu) coverage.
+ * Keyword Matcher, Arabic-script (Persian / Arabic / Urdu) coverage.
  *
  * Every case below returned `matched: false` before normalizeArabicScript
  * existed, which made keyword campaigns unusable for a Persian-speaking
@@ -44,7 +44,7 @@ describe("normalizeArabicScript", () => {
   });
 });
 
-describe("matchKeywords — Persian comments", () => {
+describe("matchKeywords, Persian comments", () => {
   it("matches a Persian keyword against an Arabic-keyboard comment", () => {
     expect(matches("لينك بده لطفا", "لینک")).toBe(true);
   });
@@ -81,7 +81,7 @@ describe("matchKeywords — Persian comments", () => {
   });
 });
 
-describe("stripSpecialCharacters — combining marks survive", () => {
+describe("stripSpecialCharacters, combining marks survive", () => {
   it("keeps a decomposed Latin diacritic joined to its base", () => {
     // Was "sen or" before \p{M} was added to the keep-set.
     expect(stripSpecialCharacters("señor".normalize("NFD"))).toBe(
