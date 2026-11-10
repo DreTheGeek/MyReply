@@ -29,6 +29,13 @@ export function allChannelAdapters(): ChannelAdapter[] {
   return Object.values(ADAPTERS);
 }
 
+/** The adapters that receive their events at one webhook endpoint. */
+export function webhookAdapters(
+  endpoint: ChannelAdapter["webhook"]["endpoint"]
+): ChannelAdapter[] {
+  return allChannelAdapters().filter((adapter) => adapter.webhook.endpoint === endpoint);
+}
+
 /**
  * The adapter that owns a webhook payload, among those that share an
  * endpoint. Meta signs Instagram and Facebook Page events with the same app

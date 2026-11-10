@@ -370,3 +370,19 @@ describe("mentions", () => {
     expect(mockQueueAdd).not.toHaveBeenCalled();
   });
 });
+
+describe("routing between Meta products", () => {
+  it("acknowledges a signed payload no adapter handles, and writes nothing", async () => {
+    const response = await post({ object: "page", entry: [{ id: "page_1", time: 1 }] });
+    expect(response.status).toBe(200);
+    expect(mockPrisma.webhookEvent.create).not.toHaveBeenCalled();
+    expect(mockQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it("ignores events for an account this deployment has not connected", async () => {
+    mockPrisma.instagramAccount.findMany.mockResolvedValue([]);
+    const response = await post(echoPayload({ mid: "mid_unknown", text: "hi" }));
+    expect(response.status).toBe(200);
+    expect(mockPrisma.webhookEvent.create).not.toHaveBeenCalled();
+  });
+});

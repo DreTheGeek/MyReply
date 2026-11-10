@@ -77,6 +77,13 @@ export interface ChannelAuth {
 }
 
 export interface ChannelWebhook {
+  /**
+   * Which webhook endpoint the platform delivers to. Adapters that share one
+   * (every Meta platform posts to the same callback URL, signed with the same
+   * app secret) share a name; the route serves the adapters registered under
+   * it.
+   */
+  endpoint: "meta";
   /** True when this adapter owns the payload, so one endpoint can serve several. */
   accepts(payload: unknown): boolean;
   /** Answer the platform's subscription handshake, or null to refuse it. */
@@ -85,6 +92,13 @@ export interface ChannelWebhook {
   verifySignature(rawBody: string, headers: Headers): boolean;
   /** Turn a verified payload into events, in the order they must be handled. */
   parse(payload: unknown): ChannelEvent[];
+  /**
+   * The payload with everything about accounts outside `accountExternalIds`
+   * removed, for storing. A platform may batch several accounts' events into
+   * one delivery, and the stored copy is filed under one workspace, so it must
+   * never carry another tenant's events.
+   */
+  scopePayload(payload: unknown, accountExternalIds: Set<string>): unknown;
 }
 
 export interface ChannelMessaging {

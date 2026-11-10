@@ -321,6 +321,7 @@ export const instagramAdapter: ChannelAdapter = {
   },
 
   webhook: {
+    endpoint: "meta",
     accepts(payload) {
       return (
         typeof payload === "object" &&
@@ -344,6 +345,22 @@ export const instagramAdapter: ChannelAdapter = {
     },
     parse(payload) {
       return parseInstagramEvents(payload);
+    },
+    scopePayload(payload, accountExternalIds) {
+      if (typeof payload !== "object" || payload === null) return payload;
+      const entry = (payload as { entry?: unknown }).entry;
+      if (!Array.isArray(entry)) return payload;
+      // Instagram files each account's events under its own entry, keyed by
+      // the account id, so scoping is keeping the right entries.
+      return {
+        ...payload,
+        entry: entry.filter(
+          (item: unknown) =>
+            typeof item === "object" &&
+            item !== null &&
+            accountExternalIds.has(String((item as { id?: unknown }).id))
+        ),
+      };
     },
   },
 

@@ -1,19 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
 import {
-  parseCommentEvents,
-  verifyWebhookSignature,
-} from "@/lib/meta/webhook";
-import { processInstagramWebhook } from "@/lib/queue/process-webhook";
+  adapterForWebhookPayload,
+  webhookAdapters,
+} from "@/lib/channels/registry";
+import { processChannelWebhook } from "@/lib/queue/process-webhook";
+
+/**
+ * Meta's webhook endpoint.
+ *
+ * Every Meta platform delivers to this one callback URL, signed with the same
+ * app secret, so the route serves every adapter registered under the "meta"
+ * endpoint and lets each payload's own adapter parse it. Today that is
+ * Instagram; a Facebook Page adapter joins it without a new route.
+ */
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const searchParams = request.nextUrl.searchParams;
-  const mode = searchParams.get("hub.mode");
-  const token = searchParams.get("hub.verify_token");
-  const challenge = searchParams.get("hub.challenge");
+  const params = request.nextUrl.searchParams;
 
-  if (mode === "subscribe" && token === process.env.WEBHOOK_VERIFY_TOKEN) {
-    return new NextResponse(challenge, { status: 200 });
+  for (const adapter of webhookAdapters("meta")) {
+    const challenge = adapter.webhook.verifyChallenge(params);
+    if (challenge !== null) {
+      return new NextResponse(challenge, { status: 200 });
+    }
   }
 
   return NextResponse.json(
@@ -24,9 +33,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const rawBody = await request.text();
-  const signature = request.headers.get("x-hub-signature-256");
+  const adapters = webhookAdapters("meta");
 
-  if (!verifyWebhookSignature(rawBody, signature)) {
+  // Checked before the body is parsed, so nothing unsigned is ever read.
+  const signed = adapters.some((adapter) =>
+    adapter.webhook.verifySignature(rawBody, request.headers)
+  );
+
+  if (!signed) {
     // This is the common symptom of FACEBOOK_APP_SECRET being set to the
     // wrong app's secret for the webhook's signing key, and while it is
     // happening no comment reaches any campaign. So it has to be loud.
@@ -35,6 +49,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // this point the payload has not been parsed and no tenant is known. The
     // operator fleet view reads it; the console line also reaches a human
     // through the platform's own log search.
+    const signature = request.headers.get("x-hub-signature-256");
     console.error(
       "[Webhook] Signature verification failed.",
       `hadSignatureHeader=${Boolean(signature)} bodyLength=${rawBody.length}.`,
@@ -74,10 +89,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
+  // A signed payload for a product no adapter handles yet (a Meta object
+  // type this engine has not added) is acknowledged and ignored, so Meta does
+  // not keep retrying it.
+  const adapter = adapterForWebhookPayload(payload, adapters);
+  if (!adapter) {
+    return NextResponse.json({ success: true }, { status: 200 });
+  }
+
   try {
-    await processInstagramWebhook({
-      payload: payload as Parameters<typeof parseCommentEvents>[0],
-    });
+    await processChannelWebhook({ adapter, payload });
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {
     // Already recorded on the WebhookEvent row. A non-2xx makes Meta retry,

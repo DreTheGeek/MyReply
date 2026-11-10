@@ -274,6 +274,14 @@ describe("webhook events", () => {
     expect(instagramAdapter.webhook.accepts({ object: "instagram" })).toBe(true);
   });
 
+  it("stores only the entries of accounts this deployment knows", () => {
+    const scoped = instagramAdapter.webhook.scopePayload(
+      { object: "instagram", entry: [{ id: "mine", time: 1 }, { id: "someone_else", time: 1 }] },
+      new Set(["mine"])
+    );
+    expect(scoped).toEqual({ object: "instagram", entry: [{ id: "mine", time: 1 }] });
+  });
+
   it("answers Meta's handshake only with the right verify token", () => {
     vi.stubEnv("WEBHOOK_VERIFY_TOKEN", "secret_token");
     const params = (token: string): URLSearchParams =>
