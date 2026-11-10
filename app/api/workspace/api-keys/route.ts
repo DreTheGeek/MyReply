@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db/client";
 import { recordAuditEvent } from "@/lib/audit";
 import { generateApiKey } from "@/lib/api-keys";
+import { WORKSPACE_SCOPES, normalizeScopes, scopeCeilingForRole } from "@/lib/api/scopes";
 import {
   canManageWorkspace,
   getCurrentWorkspaceContext,
@@ -15,6 +16,17 @@ const createSchema = z.object({
   name: z.string().trim().min(1).max(80),
   role: z.enum(["MEMBER", "ADMIN"]).default("ADMIN"),
   expiresInDays: z.number().int().positive().max(3650).optional(),
+  /**
+   * What the key may do, from lib/api/scopes.ts. Left out, the key may do
+   * everything its role allows.
+   */
+  scopes: z
+    .array(z.string())
+    .max(WORKSPACE_SCOPES.length)
+    .refine((list) => list.every((scope) => WORKSPACE_SCOPES.some((known) => known === scope)), {
+      message: "Unknown scope",
+    })
+    .optional(),
 });
 
 const revokeSchema = z.object({
@@ -45,6 +57,7 @@ export async function GET(): Promise<NextResponse> {
       name: true,
       prefix: true,
       role: true,
+      scopes: true,
       lastUsedAt: true,
       expiresAt: true,
       revokedAt: true,
@@ -99,6 +112,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
+  // A scope the key's role could never use would sit on the key doing
+  // nothing, and read as if the key could do it. Refused rather than dropped.
+  const scopes = normalizeScopes(parsed.data.scopes ?? []);
+  const ceiling = scopeCeilingForRole(parsed.data.role);
+  const beyondRole = scopes.filter((scope) => !ceiling.includes(scope));
+  if (beyondRole.length > 0) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: `A ${parsed.data.role.toLowerCase()} key cannot have ${beyondRole.join(", ")}`,
+      },
+      { status: 400 }
+    );
+  }
+
   const { plaintext, prefix, hashedKey } = generateApiKey();
   const expiresAt = parsed.data.expiresInDays
     ? new Date(Date.now() + parsed.data.expiresInDays * 86_400_000)
@@ -111,6 +139,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       prefix,
       hashedKey,
       role: parsed.data.role,
+      scopes,
       expiresAt,
       // Empty when the caller was itself an API key, which has no user behind it.
       createdByUserId: context.userId || null,
@@ -120,6 +149,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       name: true,
       prefix: true,
       role: true,
+      scopes: true,
       lastUsedAt: true,
       expiresAt: true,
       revokedAt: true,

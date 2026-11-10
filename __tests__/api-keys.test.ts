@@ -93,7 +93,34 @@ describe("resolveApiKey", () => {
       workspaceId: "ws_1",
       role: "ADMIN",
       apiKeyId: "key_1",
+      kind: "workspace",
+      partnerId: null,
+      // A key made before scopes existed has every scope its role allows.
+      scopes: expect.arrayContaining(["campaigns:write", "messages:send"]),
+      credentialId: "key:key_1",
     });
+  });
+
+  it("cuts a key's scopes to what its role allows", async () => {
+    mockPrisma.apiKey.findUnique.mockResolvedValue({
+      ...active,
+      role: "MEMBER",
+      scopes: ["campaigns:read", "campaigns:write"],
+    });
+    const context = await resolveApiKey("mr_live_secret");
+    expect(context?.scopes).toEqual(["campaigns:read"]);
+  });
+
+  it("keeps a key to exactly the scopes it was given", async () => {
+    mockPrisma.apiKey.findUnique.mockResolvedValue({ ...active, scopes: ["contacts:read"] });
+    const context = await resolveApiKey("mr_live_secret");
+    expect(context?.scopes).toEqual(["contacts:read"]);
+  });
+
+  it("never gives a workspace key a partner scope", async () => {
+    mockPrisma.apiKey.findUnique.mockResolvedValue({ ...active, scopes: ["workspaces:write"] });
+    const context = await resolveApiKey("mr_live_secret");
+    expect(context?.scopes).toEqual([]);
   });
 
   it("rejects an unknown key", async () => {

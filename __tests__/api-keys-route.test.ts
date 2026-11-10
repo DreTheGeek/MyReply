@@ -44,6 +44,7 @@ interface StoredKey {
   prefix: string;
   hashedKey: string;
   role: string;
+  scopes: string[];
   createdByUserId: string | null;
   lastUsedAt: Date | null;
   expiresAt: Date | null;
@@ -104,6 +105,7 @@ function seed(overrides: Partial<StoredKey> & { hashedKey: string }): StoredKey 
     name: "Seeded",
     prefix: "mr_live_seeded",
     role: "ADMIN",
+    scopes: [],
     createdByUserId: null,
     lastUsedAt: null,
     expiresAt: null,
@@ -139,6 +141,7 @@ beforeEach(() => {
         prefix: "",
         hashedKey: "",
         role: "ADMIN",
+        scopes: [],
         createdByUserId: null,
         lastUsedAt: null,
         revokedAt: null,
@@ -243,8 +246,34 @@ describe("the plaintext key is shown exactly once", () => {
         "prefix",
         "revokedAt",
         "role",
+        "scopes",
       ].sort()
     );
+  });
+});
+
+describe("scopes", () => {
+  it("stores the scopes asked for, in the list's own order", async () => {
+    const response = await post({ name: "Inbox mirror", scopes: ["contacts:read", "conversations:read"] });
+    expect(response.status).toBe(200);
+    expect(store[0].scopes).toEqual(["conversations:read", "contacts:read"]);
+  });
+
+  it("stores no scopes when none are asked for, which means the whole role", async () => {
+    await post({ name: "Everything" });
+    expect(store[0].scopes).toEqual([]);
+  });
+
+  it("refuses a scope the key's role could never use", async () => {
+    const response = await post({ name: "Reader", role: "MEMBER", scopes: ["campaigns:write"] });
+    expect(response.status).toBe(400);
+    expect(store).toHaveLength(0);
+  });
+
+  it("refuses a partner scope and an unknown scope", async () => {
+    expect((await post({ name: "x", scopes: ["workspaces:write"] })).status).toBe(400);
+    expect((await post({ name: "x", scopes: ["root"] })).status).toBe(400);
+    expect(store).toHaveLength(0);
   });
 });
 

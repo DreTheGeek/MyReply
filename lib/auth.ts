@@ -11,6 +11,7 @@ import {
   resolveApiKey,
   touchApiKey,
 } from "@/lib/api-keys";
+import { currentCaller } from "@/lib/api/caller-context";
 import { ensureWorkspaceForUser, getPrimaryWorkspace } from "@/lib/workspace";
 import { isEmailAllowedToSignIn } from "@/lib/env";
 
@@ -89,13 +90,14 @@ export async function getCurrentUserId(): Promise<string | null> {
 }
 
 /**
- * Resolve an API key from the ambient request headers, if one was sent.
+ * Resolve the key in the ambient request headers, if one was sent. Only the
+ * doors call this (lib/api/v1.ts); everything behind a door reads the caller
+ * the door let in, through getRequestApiKeyContext.
  *
- * Reading headers() rather than taking a Request means every existing route
- * gains machine auth without changing its signature. Returns null outside a
- * request scope (the worker, cron scripts), where cookie auth is also absent.
+ * Returns null outside a request scope (the worker, cron scripts), where
+ * cookie auth is also absent.
  */
-async function getApiKeyContext(): Promise<ApiKeyContext | null> {
+export async function resolveRequestApiKey(): Promise<ApiKeyContext | null> {
   try {
     const headerList = await headers();
     const plaintext = extractApiKey(headerList.get("authorization"));
@@ -104,19 +106,34 @@ async function getApiKeyContext(): Promise<ApiKeyContext | null> {
     const context = await resolveApiKey(plaintext);
     if (context) touchApiKey(context.apiKeyId);
     return context;
-  } catch {
+  } catch (error) {
+    // headers() throws outside a request; a lookup failure is logged so a
+    // database outage does not read as "wrong key" with nothing said.
+    if (!(error instanceof Error && /outside a request scope/i.test(error.message))) {
+      console.error(
+        "[auth] API key lookup failed:",
+        error instanceof Error ? error.name : "unknown"
+      );
+    }
     return null;
   }
 }
 
+/**
+ * The machine caller this request was let in as, or null.
+ *
+ * A key only counts once a door has checked it, its scope and its rate limit
+ * (lib/api/caller-context.ts). A key sent straight to a dashboard route is no
+ * credential at all, so a key cut to read-only cannot write by skipping v1.
+ */
 export async function getRequestApiKeyContext(): Promise<ApiKeyContext | null> {
-  return getApiKeyContext();
+  return currentCaller();
 }
 
 export async function getCurrentWorkspaceId(): Promise<string | null> {
   // A valid API key names its own workspace, so it short-circuits before the
   // session lookup. Cookie auth stays the fallback for the dashboard.
-  const apiKeyContext = await getApiKeyContext();
+  const apiKeyContext = await getRequestApiKeyContext();
   if (apiKeyContext) return apiKeyContext.workspaceId;
 
   const userId = await getCurrentUserId();

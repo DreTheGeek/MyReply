@@ -63,6 +63,10 @@ model ApiKey {
   /// The workspace role this key acts with. Reuses the same RBAC ladder as a
   /// human member, so canManageWorkspace applies unchanged.
   role            WorkspaceRole @default(ADMIN)
+  /// What the key may do, from lib/api/scopes.ts, cut to its role on every
+  /// call. Empty means everything the role allows, which is what every key
+  /// made before scopes existed keeps.
+  scopes          String[]      @default([])
   createdByUserId String?
   createdBy       User?         @relation("ApiKeyCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   lastUsedAt      DateTime?

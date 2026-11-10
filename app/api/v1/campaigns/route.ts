@@ -1,11 +1,10 @@
-import { NextRequest } from "next/server";
 import {
   GET as listAutomations,
   POST as createAutomation,
   PATCH as updateAutomation,
   DELETE as deleteAutomation,
 } from "@/app/api/automations/route";
-import { isRejection, requireApiKey } from "@/lib/api/v1";
+import { v1Route } from "@/lib/api/v1";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,31 +13,11 @@ export const dynamic = "force-dynamic";
  * Campaigns, the v1 surface.
  *
  * Delegates to the same handlers the dashboard calls, so validation, workspace
- * scoping and role checks cannot drift between the two. The only thing added
- * here is the requirement that the caller present an API key rather than a
- * session cookie.
+ * scoping and role checks cannot drift between the two. The door adds the key,
+ * the scope and the rate limit.
  */
 
-export async function GET(request: NextRequest) {
-  const caller = await requireApiKey();
-  if (isRejection(caller)) return caller;
-  return listAutomations(request);
-}
-
-export async function POST(request: NextRequest) {
-  const caller = await requireApiKey();
-  if (isRejection(caller)) return caller;
-  return createAutomation(request);
-}
-
-export async function PATCH(request: NextRequest) {
-  const caller = await requireApiKey();
-  if (isRejection(caller)) return caller;
-  return updateAutomation(request);
-}
-
-export async function DELETE(request: NextRequest) {
-  const caller = await requireApiKey();
-  if (isRejection(caller)) return caller;
-  return deleteAutomation(request);
-}
+export const GET = v1Route("campaigns:read", (request) => listAutomations(request));
+export const POST = v1Route("campaigns:write", (request) => createAutomation(request));
+export const PATCH = v1Route("campaigns:write", (request) => updateAutomation(request));
+export const DELETE = v1Route("campaigns:write", (request) => deleteAutomation(request));

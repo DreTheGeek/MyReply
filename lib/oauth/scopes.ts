@@ -1,4 +1,5 @@
 import type { WorkspaceRole } from "@/app/generated/prisma/client";
+import { READ_SCOPES, scopeCeilingForRole, type ApiScope } from "@/lib/api/scopes";
 import { canManageWorkspace } from "@/lib/roles";
 
 /**
@@ -76,4 +77,22 @@ export function narrowRoleForScopes(
     return role;
   }
   return "MEMBER";
+}
+
+/**
+ * The API scopes an OAuth connection acts with. The two consent-screen scopes
+ * are bundles of the API's: `mcp:read` is every read, and `mcp:write` adds
+ * changing campaigns, which is all the consent screen promises. The result is
+ * cut to the member's live role, so it can only ever narrow.
+ */
+export function apiScopesForOAuth(
+  scopes: readonly string[],
+  role: WorkspaceRole
+): ApiScope[] {
+  const granted = new Set<ApiScope>();
+  if (scopes.includes(SCOPE_READ) || scopes.includes(SCOPE_WRITE)) {
+    for (const scope of READ_SCOPES) granted.add(scope);
+  }
+  if (scopes.includes(SCOPE_WRITE)) granted.add("campaigns:write");
+  return scopeCeilingForRole(role).filter((scope) => granted.has(scope));
 }

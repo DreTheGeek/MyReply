@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "crypto";
 import type { WorkspaceRole } from "@/app/generated/prisma/client";
+import { effectiveScopes, scopeCeilingForRole, type ApiScope } from "@/lib/api/scopes";
 import { prisma } from "@/lib/db/client";
 
 /**
@@ -51,7 +52,19 @@ export function extractApiKey(authorization: string | null): string | null {
 export interface ApiKeyContext {
   workspaceId: string;
   role: WorkspaceRole;
+  /** The key's own row id: an ApiKey for a workspace key, a PartnerApiKey for a partner key. */
   apiKeyId: string;
+  kind: "workspace" | "partner";
+  /** Set when a partner key is acting on one of its own workspaces. */
+  partnerId: string | null;
+  /** What this credential may do, already cut to its role. */
+  scopes: ApiScope[];
+  /**
+   * Stable identity for rate limiting and idempotency. Never the secret. A
+   * partner key is counted per workspace it acts on, so one busy studio cannot
+   * use up every other studio's allowance.
+   */
+  credentialId: string;
 }
 
 /**
@@ -70,6 +83,7 @@ export async function resolveApiKey(
       role: true,
       revokedAt: true,
       expiresAt: true,
+      scopes: true,
     },
   });
 
@@ -81,6 +95,10 @@ export async function resolveApiKey(
     workspaceId: record.workspaceId,
     role: record.role,
     apiKeyId: record.id,
+    kind: "workspace",
+    partnerId: null,
+    scopes: effectiveScopes(record.scopes ?? [], scopeCeilingForRole(record.role)),
+    credentialId: `key:${record.id}`,
   };
 }
 

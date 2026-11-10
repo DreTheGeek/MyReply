@@ -5,7 +5,7 @@ import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
 import { buildTrackedUrl } from "@/lib/tracking/message";
 import { generateTrackedLinkSlug } from "@/lib/tracking/server";
 import { generateReportShareSlug } from "@/lib/reports/share";
-import { canManageWorkspace } from "@/lib/roles";
+import { hasScope, scopeCeilingForRole, type ApiScope } from "@/lib/api/scopes";
 
 /**
  * The tools an AI agent can call over MCP.
@@ -180,17 +180,32 @@ export const MCP_TOOLS: McpTool[] = [
 type ToolResult = Record<string, unknown>;
 
 /**
- * Tools that change something. A key carrying only MEMBER is refused these,
- * matching what the same role is refused over REST.
+ * The scope each tool needs: the same scope the matching REST endpoint needs,
+ * so an MCP connection and an API key with the same scopes can do exactly the
+ * same things. A tool missing from this map cannot be listed or called, which
+ * is what the test that walks MCP_TOOLS checks.
  *
- * Without this the MCP surface was a way around the REST role gate: a MEMBER
- * key that could not create a campaign through /api/v1 could create one
- * through a tool call.
+ * Without a gate the MCP surface was a way around the REST one: a read-only key
+ * that could not create a campaign through /api/v1 could create one through a
+ * tool call.
  */
-const WRITE_TOOLS = new Set(["create_campaign", "update_campaign"]);
+export const MCP_TOOL_SCOPES: Record<string, ApiScope> = {
+  list_instagram_accounts: "accounts:read",
+  list_recent_posts: "campaigns:read",
+  list_campaigns: "campaigns:read",
+  create_campaign: "campaigns:write",
+  update_campaign: "campaigns:write",
+  get_campaign: "campaigns:read",
+  get_campaign_performance: "campaigns:read",
+  list_dm_logs: "campaigns:read",
+};
+
+function isWriteTool(name: string): boolean {
+  return MCP_TOOL_SCOPES[name]?.endsWith(":write") ?? false;
+}
 
 function withAnnotations(tool: McpTool): McpTool {
-  const write = WRITE_TOOLS.has(tool.name);
+  const write = isWriteTool(tool.name);
   return {
     ...tool,
     annotations: {
@@ -202,12 +217,22 @@ function withAnnotations(tool: McpTool): McpTool {
   };
 }
 
-/** The tools a role may actually call, so a model is not offered what it cannot use. */
+/** A role stands for everything it may hold; a scope list is used as given. */
+function scopesFor(access: WorkspaceRole | readonly ApiScope[]): readonly ApiScope[] {
+  return typeof access === "string" ? scopeCeilingForRole(access) : access;
+}
+
+/** The tools a credential may actually call, so a model is not offered what it cannot use. */
+export function mcpToolsForScopes(scopes: readonly ApiScope[]): McpTool[] {
+  return MCP_TOOLS.filter((tool) => {
+    const needed = MCP_TOOL_SCOPES[tool.name];
+    return needed !== undefined && hasScope(scopes, needed);
+  }).map(withAnnotations);
+}
+
+/** The tools a role may call, with every scope that role may hold. */
 export function mcpToolsForRole(role: WorkspaceRole): McpTool[] {
-  const allowed = canManageWorkspace(role)
-    ? MCP_TOOLS
-    : MCP_TOOLS.filter((tool) => !WRITE_TOOLS.has(tool.name));
-  return allowed.map(withAnnotations);
+  return mcpToolsForScopes(scopeCeilingForRole(role));
 }
 
 const getCampaignArgs = z.object({ id: z.string().min(1).max(100) }).strict();
@@ -223,11 +248,14 @@ export async function runMcpTool(
   name: string,
   args: Record<string, unknown>,
   workspaceId: string,
-  role: WorkspaceRole
+  access: WorkspaceRole | readonly ApiScope[]
 ): Promise<ToolResult> {
-  if (WRITE_TOOLS.has(name) && !canManageWorkspace(role)) {
+  const needed = MCP_TOOL_SCOPES[name];
+  if (needed && !hasScope(scopesFor(access), needed)) {
     throw new Error(
-      `This key has ${role} access, which is read only. Creating and changing campaigns needs an admin key.`
+      isWriteTool(name)
+        ? `This connection is read only for that. ${name} needs the ${needed} scope, which an admin key or an admin's connection carries.`
+        : `This connection does not have the ${needed} scope that ${name} needs.`
     );
   }
 

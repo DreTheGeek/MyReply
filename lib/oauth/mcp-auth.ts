@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { WorkspaceRole } from "@/app/generated/prisma/client";
 import { resolveApiKey, touchApiKey } from "@/lib/api-keys";
+import type { ApiScope } from "@/lib/api/scopes";
 import { mcpToolsForRole } from "@/lib/mcp/tools";
 import {
   endpointsForIssuer,
@@ -14,6 +15,7 @@ import { getMembershipRole } from "@/lib/oauth/membership";
 import {
   DEFAULT_SCOPE,
   SCOPE_WRITE,
+  apiScopesForOAuth,
   narrowRoleForScopes,
   parseScope,
 } from "@/lib/oauth/scopes";
@@ -38,7 +40,10 @@ export interface McpCredential {
   credentialId: string;
   workspaceId: string;
   role: WorkspaceRole;
+  /** The OAuth scopes granted, or null for an API key, which has none of those. */
   scopes: string[] | null;
+  /** What the credential may do, in the API's scopes, already cut to its role. */
+  apiScopes: ApiScope[];
 }
 
 export type McpAuthResult =
@@ -156,10 +161,11 @@ export async function authenticateMcpRequest(
       ok: true,
       credential: {
         kind: "api_key",
-        credentialId: `key:${context.apiKeyId}`,
+        credentialId: context.credentialId,
         workspaceId: context.workspaceId,
         role: context.role,
         scopes: null,
+        apiScopes: context.scopes,
       },
     };
   }
@@ -232,6 +238,7 @@ export async function authenticateMcpRequest(
       // Scope narrows the live role and can never widen it.
       role: narrowRoleForScopes(role, scopes),
       scopes,
+      apiScopes: apiScopesForOAuth(scopes, role),
     },
   };
 }

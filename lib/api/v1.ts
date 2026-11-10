@@ -1,6 +1,9 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
+import type { ApiKeyContext } from "@/lib/api-keys";
+import { runAsCaller } from "@/lib/api/caller-context";
 import { consumeCredentialRequest, rateLimitRefusal } from "@/lib/api/rate-limit";
-import { getRequestApiKeyContext } from "@/lib/auth";
+import { hasScope, type ApiScope } from "@/lib/api/scopes";
+import { resolveRequestApiKey } from "@/lib/auth";
 import { getCurrentWorkspaceContext } from "@/lib/workspace-access";
 
 /**
@@ -9,57 +12,65 @@ import { getCurrentWorkspaceContext } from "@/lib/workspace-access";
  * v1 deliberately wraps the same handlers the dashboard uses rather than
  * reimplementing them. Two copies of campaign validation would drift, and the
  * drift would show up as an agent creating a campaign the UI considers invalid.
- * The wrappers exist to pin a stable URL and to reject session cookies, not to
- * add behaviour.
+ * The wrapper pins a stable URL, refuses session cookies, checks the scope and
+ * the rate limit, and turns anything unexpected into a clean 500.
  */
 
-export interface V1Caller {
-  workspaceId: string;
-  /** Present for a key-authenticated call, absent for a session. */
-  apiKeyId?: string;
+export type V1Caller = ApiKeyContext;
+
+const NO_STORE = { "Cache-Control": "no-store" } as const;
+
+export function v1Error(message: string, status = 400, headers?: Record<string, string>): NextResponse {
+  return NextResponse.json(
+    { success: false, error: message },
+    { status, headers: { ...NO_STORE, ...headers } }
+  );
+}
+
+export function v1Data(data: unknown, status = 200, headers?: Record<string, string>): NextResponse {
+  return NextResponse.json(
+    { success: true, data },
+    { status, headers: { ...NO_STORE, ...headers } }
+  );
 }
 
 /**
- * Require an API key specifically, not merely "some authentication".
+ * Require an API key specifically, not merely "some authentication", with the
+ * scope this endpoint needs.
  *
  * A browser session must not reach v1: cookies travel automatically, so a
  * logged-in user visiting a malicious page could otherwise have their browser
  * make authenticated v1 calls. Keys are sent deliberately by a program, which
  * is the whole audience for this surface.
  */
-export async function requireApiKey(): Promise<V1Caller | NextResponse> {
-  const context = await getRequestApiKeyContext();
+export async function requireApiKey(scope?: ApiScope): Promise<V1Caller | NextResponse> {
+  const context = await resolveRequestApiKey();
 
   if (!context) {
-    return NextResponse.json(
-      {
-        success: false,
-        error:
-          "This endpoint requires an API key. Send it as: Authorization: Bearer mr_live_...",
-      },
-      { status: 401 }
+    return v1Error(
+      "This endpoint requires an API key. Send it as: Authorization: Bearer mr_live_...",
+      401
     );
   }
 
   // Counted once, here, at the one door every v1 handler goes through. The
-  // handlers it delegates to resolve the key again, and counting there would
-  // charge one call two or three times.
-  const decision = await consumeCredentialRequest(`key:${context.apiKeyId}`);
+  // handlers it delegates to read the caller from the door's context and never
+  // count again.
+  const decision = await consumeCredentialRequest(context.credentialId);
   if (decision.status !== "allowed") {
     const refusal = rateLimitRefusal(decision);
-    return NextResponse.json(
-      { success: false, error: refusal.message },
-      { status: refusal.status, headers: refusal.headers }
-    );
+    return v1Error(refusal.message, refusal.status, refusal.headers);
   }
 
-  return { workspaceId: context.workspaceId, apiKeyId: context.apiKeyId };
+  if (scope && !hasScope(context.scopes, scope)) {
+    return v1Error(`This key does not have the ${scope} scope.`, 403);
+  }
+
+  return context;
 }
 
 /** True when requireApiKey returned a rejection rather than a caller. */
-export function isRejection(
-  value: V1Caller | NextResponse
-): value is NextResponse {
+export function isRejection(value: V1Caller | NextResponse): value is NextResponse {
   return value instanceof NextResponse;
 }
 
@@ -72,6 +83,38 @@ export async function v1Workspace(): Promise<string | null> {
   return context?.workspaceId ?? null;
 }
 
-export function v1Error(message: string, status = 400): NextResponse {
-  return NextResponse.json({ success: false, error: message }, { status });
+type RouteContext<P> = { params: Promise<P> };
+
+export type V1Handler<P> = (
+  request: NextRequest,
+  caller: V1Caller,
+  params: P
+) => Promise<Response>;
+
+/**
+ * A v1 route: the key, the scope and the limit checked at the door, then the
+ * handler run as that caller, so anything it delegates to sees the same key.
+ *
+ * Nothing internal reaches the client. A thrown error is logged here with the
+ * route and answered with a plain 500.
+ */
+export function v1Route<P = Record<string, never>>(
+  scope: ApiScope | null,
+  handler: V1Handler<P>
+): (request: NextRequest, context: RouteContext<P>) => Promise<Response> {
+  return async (request, context) => {
+    const caller = await requireApiKey(scope ?? undefined);
+    if (isRejection(caller)) return caller;
+
+    try {
+      const params = context?.params ? await context.params : ({} as P);
+      return await runAsCaller(caller, () => handler(request, caller, params));
+    } catch (error) {
+      console.error(
+        `[v1] ${request.method} ${request.nextUrl.pathname} failed:`,
+        error instanceof Error ? `${error.name}: ${error.message}` : "unknown"
+      );
+      return v1Error("Something went wrong on our side. Try again shortly.", 500);
+    }
+  };
 }

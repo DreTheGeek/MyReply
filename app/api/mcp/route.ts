@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { MCP_TOOLS, mcpToolsForRole, runMcpTool } from "@/lib/mcp/tools";
+import { MCP_TOOLS, mcpToolsForScopes, runMcpTool } from "@/lib/mcp/tools";
 import { consumeCredentialRequest, rateLimitRefusal } from "@/lib/api/rate-limit";
 import { CORS_HEADERS, corsPreflight } from "@/lib/oauth/errors";
 import {
@@ -110,9 +110,9 @@ export async function POST(request: NextRequest) {
       return result(id, {});
 
     case "tools/list":
-      // Filtered by the key's role, so a read-only key is never offered a
-      // write tool it would only be refused on.
-      return result(id, { tools: mcpToolsForRole(auth.role) });
+      // Filtered by the credential's scopes, so a read-only key is never
+      // offered a write tool it would only be refused on.
+      return result(id, { tools: mcpToolsForScopes(auth.apiScopes) });
 
     case "tools/call": {
       const toolName = String(params?.name ?? "");
@@ -139,7 +139,7 @@ export async function POST(request: NextRequest) {
           toolName,
           args,
           auth.workspaceId,
-          auth.role
+          auth.apiScopes
         );
         return result(id, {
           content: [{ type: "text", text: JSON.stringify(output, null, 2) }],

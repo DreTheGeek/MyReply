@@ -18,7 +18,7 @@ vi.mock("@/lib/api/rate-limit", async (importOriginal) => ({
 }));
 
 vi.mock("@/lib/auth", () => ({
-  getRequestApiKeyContext: mockApiKeyContext,
+  resolveRequestApiKey: mockApiKeyContext,
 }));
 
 vi.mock("@/lib/workspace-access", () => ({
@@ -33,7 +33,7 @@ vi.mock("@/lib/oauth/mcp-auth", () => ({
 
 vi.mock("@/lib/mcp/tools", () => ({
   MCP_TOOLS: [],
-  mcpToolsForRole: () => [],
+  mcpToolsForScopes: () => [],
   runMcpTool: vi.fn(),
 }));
 
@@ -55,6 +55,10 @@ beforeEach(() => {
     workspaceId: "ws_1",
     role: "ADMIN",
     apiKeyId: "key_1",
+    kind: "workspace",
+    partnerId: null,
+    scopes: ["campaigns:read"],
+    credentialId: "key:key_1",
   });
   mockAuthenticateMcp.mockResolvedValue({
     ok: true,
@@ -64,6 +68,7 @@ beforeEach(() => {
       workspaceId: "ws_1",
       role: "ADMIN",
       scopes: null,
+      apiScopes: [],
     },
   });
   mockConsume.mockResolvedValue({ status: "allowed", remaining: 119 });
@@ -90,6 +95,17 @@ describe("v1 key guard", () => {
     mockConsume.mockResolvedValue({ status: "unavailable" });
     const caller = await requireApiKey();
     expect(isRejection(caller) && caller.status).toBe(503);
+  });
+
+  it("refuses a key without the scope the endpoint needs, after counting it", async () => {
+    const caller = await requireApiKey("campaigns:write");
+    expect(isRejection(caller) && caller.status).toBe(403);
+    if (!isRejection(caller)) return;
+    expect((await caller.json()).error).toMatch(/campaigns:write/);
+  });
+
+  it("lets a key through when it holds the scope", async () => {
+    expect(isRejection(await requireApiKey("campaigns:read"))).toBe(false);
   });
 
   it("never counts a request that presented no key", async () => {
