@@ -63,11 +63,15 @@ export interface ConnectedAccountGrant {
 export interface ChannelAuth {
   /** Where to send the person to approve the connection. */
   authorizationUrl(input: { redirectUri: string; state: string }): string;
-  /** Trade the code from the redirect for a stored-ready grant. */
+  /**
+   * Trade the code from the redirect for stored-ready grants. A list, because
+   * one approval can cover several accounts (a person may grant several Facebook
+   * Pages at once); Instagram returns exactly one.
+   */
   completeConnection(input: {
     code: string;
     redirectUri: string;
-  }): Promise<ConnectedAccountGrant>;
+  }): Promise<ConnectedAccountGrant[]>;
   /** Extend a token close to expiry. */
   refreshToken(
     context: ChannelContext
@@ -149,6 +153,11 @@ export interface ChannelInbox {
   messages(context: ChannelContext, conversationId: string): Promise<ChannelMessage[]>;
 }
 
+export interface ChannelModeration {
+  /** Hide a comment from everyone but its author, or show it again. */
+  hideComment(context: ChannelContext, commentId: string, hidden: boolean): Promise<void>;
+}
+
 export interface ChannelProfileSettings {
   /** Null when the current value cannot be read. */
   iceBreakers(context: ChannelContext): Promise<IceBreaker[] | null>;
@@ -193,5 +202,7 @@ export interface ChannelAdapter {
   content: ChannelContent;
   inbox?: ChannelInbox;
   profileSettings?: ChannelProfileSettings;
+  /** Present when capabilities.hideComment is true. */
+  moderation?: ChannelModeration;
   errors: ChannelErrorRules;
 }

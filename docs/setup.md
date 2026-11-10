@@ -109,6 +109,8 @@ The Meta app's credentials:
 | `INSTAGRAM_APP_ID` | From the Meta app, see Step 6. |
 | `INSTAGRAM_APP_SECRET` | From the Meta app. |
 | `FACEBOOK_APP_SECRET` | From the Meta app. |
+| `FACEBOOK_APP_ID` | Optional. The Meta app's App ID (App settings, Basic), needed only to connect Facebook Pages. Leave it unset and the Connect a Facebook Page button says the deployment is not set up for it. |
+| `META_HUMAN_AGENT_APPROVED` | Optional. Set to `true` only after App Review grants the Human Agent feature. Until then a reply from the inbox more than 24 hours after the person's last message is refused instead of sent with the human agent tag. |
 | `WEBHOOK_VERIFY_TOKEN` | Any random string. You paste the same value into Meta's webhook config. |
 
 `ENCRYPTION_KEY` must be exactly 64 hex characters or the app throws on boot.
@@ -149,6 +151,16 @@ There are two app secrets and two app IDs, which is confusing. Here is what maps
 The Instagram app ID is not the same number as the Facebook App ID shown on the Basic settings page. Use the one under the Instagram product.
 
 OpenReply verifies webhook signatures against both `FACEBOOK_APP_SECRET` and `INSTAGRAM_APP_SECRET`, so you do not have to guess which one Meta signs with. Set both.
+
+### Facebook Pages (optional)
+
+The same Meta app can connect Facebook Pages for comment-to-DM and the Messenger inbox. Add the **Facebook Login for Business** product and the **Messenger** product to the app, then:
+
+1. In Facebook Login settings, add the redirect URI `https://YOUR-DOMAIN/api/channels/facebook/callback`.
+2. In the app's Webhooks settings, choose the **Page** object, use the same callback URL and verify token as Instagram (`https://YOUR-DOMAIN/api/webhook`), and subscribe to `feed`, `messages`, `messaging_postbacks`, `message_reads`, `message_echoes`, `message_edits`, `message_reactions` and `messaging_referrals`. Each connected Page is also subscribed automatically when it connects.
+3. Set `FACEBOOK_APP_ID`. `FACEBOOK_APP_SECRET` is already set for Instagram.
+
+Then use **Connect a Facebook Page** in Settings. Facebook asks which Pages to share; every Page you choose, and can message from, is connected. The permissions and why each is needed are in [docs/review/meta.md](review/meta.md).
 
 ### Step 6: Add your Instagram account as a tester, and accept the invite
 

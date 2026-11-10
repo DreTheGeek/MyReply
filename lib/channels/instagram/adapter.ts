@@ -311,13 +311,15 @@ export const instagramAdapter: ChannelAdapter = {
       );
       const { accessToken, expiresIn } = await meta.getLongLivedToken(shortLived);
       const profile = toChannelProfile(await meta.getUserInfo(accessToken));
-      return {
-        externalId: profile.externalId,
-        username: profile.username,
-        name: profile.name,
-        accessToken,
-        expiresAt: new Date(Date.now() + expiresIn * 1000),
-      };
+      return [
+        {
+          externalId: profile.externalId,
+          username: profile.username,
+          name: profile.name,
+          accessToken,
+          expiresAt: new Date(Date.now() + expiresIn * 1000),
+        },
+      ];
     },
     async refreshToken(context) {
       const { accessToken, expiresIn } = await meta.refreshLongLivedToken(
@@ -379,6 +381,12 @@ export const instagramAdapter: ChannelAdapter = {
   },
 
   messaging,
+
+  moderation: {
+    async hideComment(context, commentId, hidden) {
+      await meta.setCommentHidden(context.accessToken, commentId, hidden);
+    },
+  },
 
   content: {
     async profile(context) {

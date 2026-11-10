@@ -63,7 +63,10 @@ vi.mock("@/lib/db/client", () => ({
   prisma: mockPrisma,
 }));
 
-vi.mock("@/lib/meta/client", () => ({
+vi.mock("@/lib/meta/client", async (importOriginal) => ({
+  // The Facebook Page client reuses these two, so they stay real.
+  handleResponse: (await importOriginal<typeof import("../lib/meta/client")>()).handleResponse,
+  facebookGraphBase: (await importOriginal<typeof import("../lib/meta/client")>()).facebookGraphBase,
   sendPrivateReply: mockSendPrivateReply,
   sendPrivateReplyWithLinkButton: mockSendPrivateReplyWithLinkButton,
   sendPrivateReplyWithButton: mockSendPrivateReplyWithButton,
@@ -1312,6 +1315,36 @@ describe("DM Worker, the default follow-gate prompt", () => {
     // Every business on the platform inherits this text, so it must not
     // promote anything of ours.
     expect(text.toLowerCase()).not.toMatch(/github|star the repo|support me/);
+  });
+});
+
+describe("DM Worker, a platform without a follow check", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("sends the link on a Facebook Page even when the campaign asked for a follow", async () => {
+    mockPrisma.automation.findMany.mockResolvedValue([
+      {
+        ...mockAutomation,
+        requireFollow: true,
+        instagramAccount: { ...mockAutomation.instagramAccount, platform: "FACEBOOK" },
+      },
+    ]);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ message_id: "m_1", recipient_id: "psid" })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getProcessor()(createMockJob());
+
+    // Pages cannot say whether someone follows, so the gate is not applied.
+    expect(mockGetUserFollowStatus).not.toHaveBeenCalled();
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain("graph.facebook.com");
+    const body = JSON.parse(init.body);
+    expect(body.recipient).toEqual({ comment_id: mockJobData.commentId });
+    expect(body.message.text).toContain("https://example.com");
   });
 });
 

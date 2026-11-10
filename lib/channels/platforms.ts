@@ -6,7 +6,7 @@
  * registry asserts the two lists match, so adding a platform to one and not
  * the other fails to compile.
  */
-export const CHANNEL_PLATFORMS = ["INSTAGRAM"] as const;
+export const CHANNEL_PLATFORMS = ["INSTAGRAM", "FACEBOOK"] as const;
 
 export type ChannelPlatform = (typeof CHANNEL_PLATFORMS)[number];
 
@@ -20,4 +20,5 @@ export function isChannelPlatform(value: unknown): value is ChannelPlatform {
 /** What each platform is called on screen. */
 export const PLATFORM_LABELS: Record<ChannelPlatform, string> = {
   INSTAGRAM: "Instagram",
+  FACEBOOK: "Facebook",
 };

@@ -112,7 +112,7 @@ const INSTAGRAM: ChannelCapabilities = {
   directMessage: true,
   privateReply: true,
   publicReply: true,
-  hideComment: false,
+  hideComment: true,
   triggers: {
     comment: true,
     liveComment: true,
@@ -139,8 +139,54 @@ const INSTAGRAM: ChannelCapabilities = {
   rateLimits: { privateRepliesPerHour: 750 },
 };
 
+/**
+ * A Facebook Page, through the Messenger Platform and the Pages API.
+ *
+ * From Meta's current docs: a comment on a Page post gets one private reply,
+ * within 7 days, and nothing more until the person answers; the standard
+ * messaging window is 24 hours; a human in the inbox may use the 7 day human
+ * agent window with the Human Agent feature approved. Comments can be
+ * replied to and hidden as the Page.
+ *
+ * Not offered: the follow gate (Pages expose no "does this person follow us"
+ * check), story triggers and Live comments (not part of these webhooks).
+ * Meta documents no per-hour private reply cap for Pages, so null here; the
+ * engine's own per-account limiter still applies.
+ */
+const FACEBOOK: ChannelCapabilities = {
+  directMessage: true,
+  privateReply: true,
+  publicReply: true,
+  hideComment: true,
+  triggers: {
+    comment: true,
+    liveComment: false,
+    dmKeyword: true,
+    storyReply: false,
+    storyMention: false,
+    referral: true,
+    defaultReply: true,
+  },
+  buttons: { postback: true, url: true, max: 3, titleMax: 20 },
+  quickReplies: {
+    supported: true,
+    max: 13,
+    titleMax: 20,
+    collectsEmail: true,
+    collectsPhone: true,
+  },
+  media: { image: true, video: true, audio: true, file: true },
+  followGate: false,
+  iceBreakers: { supported: true, max: 4, questionMax: 80, payloadMax: 1000 },
+  persistentMenu: { supported: true, maxItems: 20, titleMax: 30, payloadMax: 1000 },
+  inbox: true,
+  window: { standardHours: 24, privateReplyDays: 7, humanAgentDays: 7 },
+  rateLimits: { privateRepliesPerHour: null },
+};
+
 export const CHANNEL_CAPABILITIES: Record<ChannelPlatform, ChannelCapabilities> = {
   INSTAGRAM,
+  FACEBOOK,
 };
 
 export function getChannelCapabilities(

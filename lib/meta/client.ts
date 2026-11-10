@@ -11,7 +11,7 @@ export function instagramGraphBase() {
   return `https://graph.instagram.com/${getMetaGraphApiVersion()}`;
 }
 
-function facebookGraphBase() {
+export function facebookGraphBase() {
   return `https://graph.facebook.com/${getMetaGraphApiVersion()}`;
 }
 
@@ -617,6 +617,26 @@ export async function sendCommentReply(
     }
   );
 
+  return handleResponse(response);
+}
+
+/**
+ * Hide a comment on the account's own media from everyone but its author, or
+ * show it again. Needs instagram_business_manage_comments.
+ */
+export async function setCommentHidden(
+  accessToken: string,
+  commentId: string,
+  hidden: boolean
+): Promise<{ success?: boolean }> {
+  const response = await fetch(`${instagramGraphBase()}/${commentId}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ hide: hidden }),
+  });
   return handleResponse(response);
 }
 

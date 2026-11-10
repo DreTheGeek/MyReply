@@ -378,6 +378,21 @@ function automatedWindowOpen(
   }).allowed;
 }
 
+/**
+ * Whether the follow gate applies. A campaign's requireFollow is honoured only
+ * on a platform that can check a follow; elsewhere (a Facebook Page) the link
+ * goes out ungated rather than leaving someone at a prompt nothing can clear.
+ */
+function followGateOn(automation: {
+  requireFollow: boolean;
+  instagramAccount: { platform: ChannelPlatform };
+}): boolean {
+  return (
+    automation.requireFollow &&
+    getChannelCapabilities(automation.instagramAccount.platform).followGate
+  );
+}
+
 function connectionScope(data: DmQueueJob) {
   return data.accountConnectionId ? { instagramAccountId: data.accountConnectionId } : {};
 }
@@ -839,7 +854,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
     // status at comment time: confirmed followers get the link now, everyone
     // else gets the "follow me first" prompt (re-verified on tap).
     let sendFollowPrompt = false;
-    if (automation.requireFollow && !useOpeningDm) {
+    if (followGateOn(automation) && !useOpeningDm) {
       const alreadyFollows = await channel.adapter.messaging.followStatus(
         channel.context,
         commenterId
@@ -880,7 +895,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
                 // The ":open" marker tells a tap here apart from the follow
                 // prompt's own "I'm following" button, which sends the same
                 // prefix.
-                payload: `${automation.requireFollow ? "followcheck" : "reveal"}:${automation.id}:open`,
+                payload: `${followGateOn(automation) ? "followcheck" : "reveal"}:${automation.id}:open`,
               },
             ],
           },
@@ -1244,7 +1259,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
   // be bypassable by just reading the DM and waiting. On a tap, following or
   // unverifiable (null) falls through and delivers the link, fail-open so a
   // real follower is never trapped.
-  if ((isFollowCheck || fallback) && automation.requireFollow) {
+  if ((isFollowCheck || fallback) && followGateOn(automation)) {
     const follows = await channel.adapter.messaging.followStatus(
       channel.context,
       userId
@@ -1830,7 +1845,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
     // the user has already claimed to follow; here it would hand the link to
     // anyone whose status the API happens not to resolve.
     let sendFollowPrompt = false;
-    if (automation.requireFollow) {
+    if (followGateOn(automation)) {
       const follows = await channel.adapter.messaging.followStatus(
         channel.context,
         senderId

@@ -7,12 +7,13 @@ import LanguageSwitcher from "@/components/language-switcher";
 import { useI18n } from "@/lib/i18n/provider";
 import { Suspense, useEffect, useState } from "react";
 import type { AccountOption } from "@/components/account-select";
+import { FacebookConnectNotice } from "@/components/facebook-connect-notice";
 import { InstagramConnectNotice } from "@/components/instagram-connect-notice";
 import AiKeySection from "@/components/settings/ai-key-section";
 import ApiKeysSection from "@/components/settings/api-keys-section";
 import PersistentMenuSection from "@/components/settings/persistent-menu-section";
 import { getChannelCapabilities } from "@/lib/channels/capabilities";
-import type { ChannelPlatform } from "@/lib/channels/platforms";
+import { PLATFORM_LABELS, type ChannelPlatform } from "@/lib/channels/platforms";
 
 /**
  * Whether an account's platform offers a profile setting. An account read
@@ -186,7 +187,7 @@ export default function SettingsPage() {
   }
 
   async function disconnectInstagram(instagramAccountId: string) {
-    if (!confirm(t("Disconnect Instagram? Campaigns for this account will stop sending DMs."))) {
+    if (!confirm("Disconnect this account? Its campaigns will stop sending messages.")) {
       return;
     }
 
@@ -382,6 +383,7 @@ export default function SettingsPage() {
           page fails the production build without one. */}
       <Suspense fallback={null}>
         <InstagramConnectNotice />
+        <FacebookConnectNotice />
       </Suspense>
 
       {/* Say the settings could not be read, rather than letting every
@@ -450,13 +452,24 @@ export default function SettingsPage() {
               >
                 <div>
                   <p className="text-sm font-semibold text-foreground">
-                    @{account.username}
+                    {account.platform === "FACEBOOK"
+                      ? account.name ?? account.username
+                      : `@${account.username}`}{" "}
+                    <span className="ml-1 rounded-full border border-border px-2 py-0.5 text-[11px] font-normal text-muted">
+                      {PLATFORM_LABELS[account.platform ?? "INSTAGRAM"]}
+                    </span>
                   </p>
                   <p className="mt-1 text-xs text-muted">
-                    {t("Token expires")}{" "}
-                    {account.tokenExpiresAt
-                      ? new Date(account.tokenExpiresAt).toLocaleDateString(locale)
-                      : t("not available")}{" "}
+                    {account.platform === "FACEBOOK" ? (
+                      "Page access does not expire"
+                    ) : (
+                      <>
+                        {t("Token expires")}{" "}
+                        {account.tokenExpiresAt
+                          ? new Date(account.tokenExpiresAt).toLocaleDateString(locale)
+                          : t("not available")}
+                      </>
+                    )}{" "}
                     · {account.webhookSubscribed ? t("Webhook ready") : t("Webhook pending")}
                   </p>
                 </div>
@@ -474,12 +487,18 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <div className="mt-6 pt-4 border-t border-border flex gap-3">
+        <div className="mt-6 pt-4 border-t border-border flex flex-wrap gap-3">
           <a
             href="/api/instagram/connect"
             className="px-4 py-2 rounded text-sm font-medium transition-colors bg-accent text-on-accent hover:bg-accent-hover"
           >
-            {t("Connect using your own Meta app")}
+            {t("Connect Instagram")}
+          </a>
+          <a
+            href="/api/channels/facebook/connect"
+            className="px-4 py-2 rounded border border-border text-sm font-medium text-foreground transition-colors hover:border-border-hover"
+          >
+            Connect a Facebook Page
           </a>
         </div>
       </section>

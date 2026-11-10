@@ -44,7 +44,9 @@ export async function GET(request: NextRequest) {
     // The adapter trades the code for a long-lived token and reads the
     // account's own id: for Instagram the professional account id (user_id)
     // that webhooks and the messaging API key off, not the app-scoped `id`.
-    const grant = await adapter.auth.completeConnection({ code, redirectUri });
+    // Instagram grants exactly one account per approval.
+    const [grant] = await adapter.auth.completeConnection({ code, redirectUri });
+    if (!grant) throw new Error("Instagram returned no account to connect");
     const instagramId = grant.externalId;
     const connection = await canConnectInstagramAccount({
       workspaceId: state.workspaceId,

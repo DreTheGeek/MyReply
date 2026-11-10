@@ -18,6 +18,8 @@ const SCANNED = ["app", "components", "lib", "worker"];
 /** Directories allowed to touch Instagram directly. */
 const INSTAGRAM_OWNERS = [
   "lib/channels/instagram/",
+  // The Facebook Page adapter wraps the same Graph client for Pages.
+  "lib/channels/facebook/",
   // The Graph client, webhook parser, OAuth and menu code the adapter wraps.
   "lib/meta/",
 ];

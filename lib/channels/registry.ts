@@ -1,5 +1,6 @@
 import type { ChannelPlatform as StoredPlatform } from "@/app/generated/prisma/client";
 import type { ChannelAccountRow, ChannelAdapter, ChannelContext } from "./adapter";
+import { facebookAdapter } from "./facebook/adapter";
 import { instagramAdapter } from "./instagram/adapter";
 import type { ChannelPlatform } from "./platforms";
 
@@ -13,6 +14,7 @@ import type { ChannelPlatform } from "./platforms";
 const ADAPTERS: Record<ChannelPlatform, ChannelAdapter> &
   Record<StoredPlatform, ChannelAdapter> = {
   INSTAGRAM: instagramAdapter,
+  FACEBOOK: facebookAdapter,
 };
 
 export function getChannelAdapter(platform: ChannelPlatform): ChannelAdapter {

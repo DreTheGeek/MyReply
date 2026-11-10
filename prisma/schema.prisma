@@ -674,6 +674,7 @@ enum OutboundMessageSource {
 /// registry fails to compile if the two drift apart.
 enum ChannelPlatform {
   INSTAGRAM
+  FACEBOOK
 }
 
 enum AiProvider {
